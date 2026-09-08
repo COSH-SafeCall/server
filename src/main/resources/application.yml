@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: SafeCall_Service
+  config:
+    import: optional:file:.env[.properties]
+
+app:
+  datasource:
+    host: ${DB_HOST:127.0.0.1}
+    port: ${DB_PORT:3306}
+    name: ${DB_NAME:auth_db}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+  jwt:
+    secret: ${JWT_SECRET:}
+    access-expiration: ${JWT_ACCESS_EXPIRATION:3600000}
+    refresh-expiration: ${JWT_REFRESH_EXPIRATION:1209600000}
+  oauth:
+    kakao:
+      client-id: ${KAKAO_CLIENT_ID:}
+      client-secret: ${KAKAO_CLIENT_SECRET:}
+      redirect-uri: ${KAKAO_REDIRECT_URI:http://localhost:8081/login/oauth2/code/kakao}

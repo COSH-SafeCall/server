@@ -1,0 +1,29 @@
+HELP.md
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+### Visual Studio Code ###
+.vscode/
+
+### Eclipse ###
+.classpath
+.project
+.settings/
+.apt_generated/
+.factorypath
+.springBeans
+.sts4-cache/
+bin/
+
+### Environment variables ###
+.env
+.env.*
+!.env.example
