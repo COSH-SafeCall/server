@@ -1,6 +1,6 @@
 # SafeCall 서버
 
-Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. API 설계 v2.1의 **0장 공통 설계, 1장 A01~A07, 2장 U01~U12**를 구현한다. 현재 운영 배포나 실제 카카오 로그인 검증까지 완료한 상태는 아니다.
+Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. API 설계 v2.1의 **0장 공통 설계, 1장 A01~A07, 2장 U01~U12, 3장 H01~H02**를 구현한다. 현재 운영 배포나 실제 카카오 로그인 검증까지 완료한 상태는 아니다.
 
 ## 코드 구조
 
@@ -14,10 +14,14 @@ src/main/java/com/safecall/service/
    ├─ kakao            # 카카오 검증 인터페이스와 실제 HTTP 구현
    ├─ repository       # MySQL SQL, 행 매핑, 잠금과 저장
    └─ service          # 발급·회전·로그아웃·온보딩·만료/재생 암호문 정리
-└─ user/
+├─ user/
    ├─ api              # 프로필·동의·연락망·설정 Controller와 DTO
    ├─ repository       # 사용자 행 매핑, 문서·동의·연락망 SQL
    └─ service          # 입력 정규화, 동의 철회, AI/위치 데이터 정리
+└─ home/
+   ├─ api              # 홈 자격·고정 통화 선택지 Controller와 DTO
+   ├─ repository       # 보호자 수, 상황·상대 카탈로그 SQL
+   └─ service          # 메시지 작성 조건·현재 동의 판정, 카탈로그 검증
 ```
 
 `AuthService`는 외부 카카오 호출과 제한된 DB 경쟁 재시도를 맡는다. `AuthTransactions`는 DB 변경을 하나의 트랜잭션으로 묶는다. refresh 재사용·만료로 폐기한 세션은 401을 반환하더라도 폐기를 커밋하고, 로그아웃 DB 실패는 전체 롤백한다. JDBC의 UUID는 swap 없는 BINARY(16), 날짜/시간은 UTC이며 SQL 식별자는 camelCase를 보존한다.
@@ -45,6 +49,10 @@ src/main/java/com/safecall/service/
 | U10 | DELETE /api/v1/me/emergency-contacts/{contactId} | 보호자 연락망 삭제, 삭제 요청 멱등 처리 |
 | U11 | GET /api/v1/me/settings | 사용자 알림 설정 조회 |
 | U12 | PATCH /api/v1/me/settings | 알림 모드 수정, 버전 충돌 검증 |
+| H01 | GET /api/v1/home | 게스트·회원 메시지 작성 자격, 차단 사유, 위치 동의, 보호자 수 |
+| H02 | GET /api/v1/call-options | 상황 4개·상대 3개, 빠른 시작 기본값, 인증 후 ETag/304 |
+
+H01은 현재 개인정보 처리 동의와 프로필 확인·온보딩 완료·보호자 수를 검사하며 AI 동의를 메시지 조건으로 요구하지 않는다. 위치 동의는 Android 권한·실제 위치 취득 결과와 별개다. H02는 기존 DB 고정 카탈로그를 사용하며 프롬프트 발행 상태에 의존하지 않는다. catalogVersion=2는 배포 코드의 고정 버전이며 카탈로그 변경 배포 시 함께 관리한다. ETag는 버전뿐 아니라 전체 응답 내용으로 계산한다. H02는 private/no-cache 재검증을 사용하고 304 처리 전에 세션을 확인한다.
 
 A07 재시도는 같은 작업인지 먼저 검사하고 현재 온보딩 상태를 반환한다. 게스트 수명은 최초 발급 후 총 24시간이며 refresh로 늘어나지 않는다. 권한 거부 자체는 진행을 막지 않으며 게스트 위치 권한은 받지 않는다. 문자 발송/SENS 구현은 없다.
 
@@ -71,7 +79,7 @@ HTTP는 로컬 개발용이다. 실제 서비스에서는 신뢰할 인입 계�
 
 로컬 DB와 `.env` 준비는 [로컬 MySQL 설정 가이드](docs/local-db-setup.md)를 따른다. A01~A07 및 U01~U12 수동 API 테스트는 [로그인·사용자 API Swagger 통합 검수 가이드](docs/swagger-test-guide.md)를 따른다. U03/U04/U05/U06 테스트용 개발 문서는 [개발용 문서 시드](db/dev/seed-test-documents.sql)를 빈 로컬 개발 DB에만 적용한다. 서버 실행 후 [Swagger UI](http://localhost:8081/swagger-ui/index.html)에서 A01~A07과 U01~U12를 실행할 수 있다. OpenAPI JSON은 `/v3/api-docs`로 제공한다. 설정은 [springdoc 공식 문서](https://springdoc.org/getting-started.html)의 Spring Boot 4용 3.1.1을 사용한다.
 
-2026-09-09 검증: 단위·설정 테스트 17개와 MySQL HTTP 통합 테스트 48개, 총 **65개 통과**. 동시 가입/refresh 경쟁, 토큰 재사용 폐기의 커밋, 로그아웃 실패 롤백, 로그인 중 계정 삭제, 프로필·연락망·동의·설정의 버전/멱등/소유권 검증, 동의 철회 후 AI/위치 데이터 정리, 잘못된 요청의 공통 JSON 응답, Swagger 문서/UI와 요청 예제의 실제 호출을 포함한다. 환경 분리 시험에서는 로컬 키 유지, 운영의 `.env` 미사용, Swagger 기본 비활성화, 프로필 혼용 및 운영 키 저장소 미구현 시 시작 차단을 확인한다.
+2026-09-10 검증: 단위·설정 테스트 17개와 MySQL HTTP 통합 테스트 53개, 총 **70개 통과**, bootJar 성공. 기존 인증·사용자 검증에 홈 자격/문서 버전 변경/위치 동의 철회, 카탈로그 내용·ETag 변경, 조건부 조회의 인증 검증, 만료·로그아웃·계정 삭제 대기 차단과 OpenAPI 검증을 추가했다. 통합 테스트는 일회용 MySQL을 사용하며 서비스 DB를 변경하지 않는다.
 
 외부 서비스나 MySQL 없이 실행하는 테스트:
 
