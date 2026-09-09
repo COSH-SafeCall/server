@@ -131,7 +131,7 @@ class AuthIntegrationTest {
 		assertThat(document.status()).isEqualTo(200);
 		assertThat(document.text("openapi")).startsWith("3.0.");
 		JsonNode paths = document.body().path("paths");
-		assertThat(paths.size()).isEqualTo(7);
+		assertThat(paths.size()).isEqualTo(14);
 		JsonNode guest = paths.path("/api/v1/auth/guest").path("post");
 		assertThat(guest.path("operationId").asString()).isEqualTo("A01");
 		assertThat(guest.path("responses").has("201")).isTrue();
