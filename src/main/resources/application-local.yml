@@ -1,0 +1,20 @@
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  datasource:
+    url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:safecall}?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&characterEncoding=UTF-8
+    username: ${DB_USERNAME:safecall_app}
+    password: ${DB_PASSWORD:}
+
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:true}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:true}
+
+app:
+  crypto:
+    key-directory: ${CRYPTO_KEY_DIRECTORY:.keys}
+  oauth:
+    kakao:
+      redirect-uri: ${KAKAO_REDIRECT_URI:http://localhost:8081/login/oauth2/code/kakao}

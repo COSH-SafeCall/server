@@ -119,7 +119,7 @@ $rng.Dispose()
 
 ## 6. 서버 실행 확인
 
-서버 폴더에서 실행한다.
+서버 폴더에서 실행한다. 프로필을 지정하지 않으면 `local`로 시작하며 `application-local.yml`이 `.env`를 읽는다. 기존 `.env`를 변경할 필요는 없다.
 
 ```powershell
 cd C:\Users\tisxo\AI_Championship\server
