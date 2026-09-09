@@ -41,7 +41,7 @@ public class OpenApiConfiguration {
 			.description("A01/A02의 tokens.accessToken 또는 A03의 accessToken 값만 입력하세요. Bearer 접두사는 UI가 붙입니다."));
 		ModelConverters.getInstance().readAll(ErrorResponse.class).forEach(components::addSchemas);
 		return new OpenAPI().components(components).info(new Info().title("SafeCall API 테스트")
-			.version("2.1 / A01–A07, U01–U12")
+			.version("2.1 / A01–A07, U01–U12, H01–H02")
 			.description("""
 				구현된 인증·온보딩 API를 직접 테스트합니다.
 
