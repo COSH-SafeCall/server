@@ -1,10 +1,10 @@
 # 로그인부터 사용자 설정까지 Swagger 통합 검수 가이드
 
-대상: A01~A07, U01~U12. 요청 필드는 현재 `AuthDtos`, `UserDtos`, 컨트롤러 및 기존 검수 문서를 기준으로 확인했다. DB 계정·환경 변수 설정은 [로컬 DB 설정](local-db-setup.md)에 별도로 둔다.
+대상: A01~A07, U01~U12, H01~H02. 요청 필드는 현재 DTO와 컨트롤러를 기준으로 확인했다. DB 계정·환경 변수 설정은 [로컬 DB 설정](local-db-setup.md)에 별도로 둔다.
 
 각 단계 제목을 클릭하면 내용을 접고 펼칠 수 있다. GitHub Markdown 미리보기에서 `<details>`를 지원하며, 일부 편집기는 원문 HTML로 표시할 수 있다.
 
-**권장 순서:** 준비 → 새 설치 생성 → 게스트 검수 → 카카오 로그인 → 프로필 → 연락망 등록 → 문서·동의 → 회원 온보딩 → 설정 → 갱신·로그아웃 → 선택 오류/철회 검수.
+**권장 순서:** 준비 → 새 설치 생성 → 게스트 검수(홈 포함) → 카카오 로그인 → 프로필 → 연락망 등록 → 문서·동의 → 회원 온보딩 → 홈·통화 선택지 → 설정 → 갱신·로그아웃 → 선택 오류/철회 검수.
 
 성공 판정은 HTTP 상태뿐 아니라 응답 값과 재조회 결과까지 확인한다. 예제의 `version: 1`은 실제 조회 값이 1일 때만 사용한다. 이 문서 통과가 운영 보안 전체의 검증을 뜻하지는 않는다.
 
@@ -183,13 +183,35 @@ try {
 }
 ```
 
-성공 후 다음 명령으로 필요한 카카오 access token만 클립보드에 복사한다. 전체 응답에는 refresh token, id token 등이 포함될 수 있으므로 출력·공유하지 않는다.
+### “카카오 토큰 발급 성공 (값은 출력하지 않음)” 이후
+
+이 메시지는 정상이다. 발급 응답은 **지금 실행한 PowerShell 창의 `$kakaoToken` 변수**에 저장되어 있고, 필요한 access token은 **`$kakaoToken.access_token`**에 있다. 화면에 표시하지 않았을 뿐 토큰이 없는 상태가 아니다.
+
+같은 PowerShell 창에서 다음 명령으로 카카오 access token만 클립보드에 복사한다. 전체 응답에는 refresh token, id token 등이 포함될 수 있으므로 전체 응답을 출력·공유하지 않는다.
 
 ```powershell
 if ($kakaoToken -and $kakaoToken.access_token) {
   Set-Clipboard -Value $kakaoToken.access_token
+  Write-Host '복사 완료: Swagger A02 본문의 kakaoAccessToken 값에 붙여 넣으세요.'
+} else {
+  Write-Host '저장된 토큰이 없습니다. 발급한 PowerShell 창인지 확인하세요.'
 }
 ```
+
+Swagger A02 Request body의 `kakaoAccessToken`에 있는 안내 문자열을 지우고, **큰따옴표 안에 Ctrl+V**로 붙여 넣는다. 복사 명령 자체나 `Bearer`를 붙여 넣지 않는다. 이 카카오 토큰은 Swagger Authorize 입력용이 아니다.
+
+직접 값을 확인해야 할 때만 같은 창에서 아래를 실행한다. 토큰이 화면에 그대로 출력되므로 일반 검수에서는 위 복사 명령만 사용해도 된다.
+
+```powershell
+$kakaoToken.access_token
+```
+
+PowerShell 창을 닫거나 `Remove-Variable kakaoToken`을 실행하면 이 변수는 사라진다. 새 창에서 조회할 수 없으며, 값을 보관하지 않았다면 새 인가 코드로 발급 절차를 다시 진행한다.
+
+| 토큰 | 넣는 위치 |
+| --- | --- |
+| PowerShell의 `$kakaoToken.access_token` | A02 JSON 본문의 `kakaoAccessToken` |
+| A02 성공 응답의 `tokens.accessToken` | Swagger Authorize의 `accessToken` 칸. 값만 입력 |
 
 ### A02 실행
 
@@ -356,7 +378,35 @@ MESSAGE_TEST에서는 아래 형식으로 SKIP을 명시한다.
 </details>
 
 <details>
-<summary><strong>8. 필수: U11 → U12 → U11 설정 저장</strong></summary>
+<summary><strong>8. 필수: H01/H02 홈·통화 선택지 → U11/U12 설정</strong></summary>
+
+### H01 GET /api/v1/home
+
+현재 SafeCall access token으로 Authorize하고 요청 본문·멱등 키 없이 실행한다. 게스트 상태에서도 로그인 전 2장 검수 중 확인할 수 있다.
+
+| 상태 | 기대 결과 |
+| --- | --- |
+| 게스트 | 200, isMessageComposeEligible=false, messageBlockReasons=[LOGIN_REQUIRED], isLocationConsentGranted=false, guardianCount=0, settingsMode=LOGIN_ONLY |
+| 신규 회원 | 200, 미충족 조건에 따라 ONBOARDING_REQUIRED/PROFILE_REQUIRED/CONSENT_REQUIRED/CONTACT_REQUIRED 반환, settingsMode=MEMBER |
+| 프로필 확인·현재 개인정보 처리 동의·온보딩 COMPLETE·보호자 1~2명 | 200, isMessageComposeEligible=true, messageBlockReasons=[] |
+| 위치 동의 없음/철회/이전 문서 버전 | isLocationConsentGranted=false. 메시지 작성 가능 여부와 별도로 판정 |
+| 토큰 없음·만료·로그아웃 | 401. 로그인 응답처럼 200으로 처리하지 않음 |
+
+H01은 Cache-Control: no-store다. AI_CALL 동의는 메시지 작성 조건에 포함하지 않는다. 위치 동의 값은 Android 위치 권한이나 실제 좌표 취득 성공을 뜻하지 않는다. 홈은 개인정보 원문이나 메시지 본문을 반환하지 않는다.
+
+### H02 GET /api/v1/call-options
+
+1. Authorize 유지. If-None-Match를 비우고 Execute한다. 요청 본문·멱등 키는 없다.
+2. 200, scenarios 정확히 4개, counterparts 정확히 3개를 확인한다.
+3. 기본 시드 기준 FOLLOWED→UP, UNSAFE_TAXI→RIGHT, STRANGER_NEARBY→DOWN, WALKING_ALONE→LEFT다. counterpart는 FATHER/MOTHER/FRIEND이며 quickStart는 holdMs=1000, counterpartCode=FATHER다. catalogVersion=2를 확인한다.
+4. 응답 ETag를 따옴표 포함 If-None-Match에 복사하고 같은 요청을 보내면 304와 빈 본문이다. 다시 본문이 필요하면 헤더를 지운다.
+5. Authorize를 해제한 뒤 같은 ETag로 조회해도 401이어야 한다. 검수 후 유효한 토큰으로 복원한다.
+
+고정 선택지는 DB 스키마의 scenario/counterpart 초기 데이터에서 읽는다. 프롬프트 발행 여부와 무관하다. 서버는 카탈로그가 4개/3개로 구성되지 않으면 부분 성공을 반환하지 않는다. 오류가 나면 로컬 DB의 시드 상태를 확인하고 기존 DB에 스키마 전체를 재실행하지 않는다.
+
+H02의 캐시는 private, no-cache로 매번 서버 검증을 요구한다. 선택지 조회만으로 Gemini 연결이나 통화를 시작하지 않는다. 길게 누르기 애니메이션·중앙에서 놓기 취소는 프론트 구현 범위다.
+
+### U11 → U12 → U11
 
 U11의 초기값은 RINGTONE이다. 현재 설정 버전을 U12에 넣는다.
 
@@ -495,6 +545,8 @@ AI_DATA 정리 중 재동의·성별/생년월일 저장은 409 DATA_CLEANUP_PEN
 - [ ] U03 예상 문서 존재, U05 이후 U04 현재 필수 동의 isValid=true
 - [ ] 회원 A06 COMPLETE, isAdvanceAllowed=false
 - [ ] U12 200, U11에서 설정값/버전 확인
+- [ ] H01 게스트·회원 차단 사유와 자격 충족 상태, 위치 동의 구분 확인
+- [ ] H02 4개 상황·3개 상대·quickStart, ETag 304, 인증 없는 조건부 조회 401 확인
 - [ ] A03 갱신 후 새 토큰의 A05 200
 - [ ] A04 204, 폐기된 세션의 A05 401
 - [ ] 선택: U09/U10, 중복·최대 2명·타인 접근 거절, ETag 304, 버전 충돌

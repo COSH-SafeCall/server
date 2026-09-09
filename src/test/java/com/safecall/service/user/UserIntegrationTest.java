@@ -77,6 +77,91 @@ class UserIntegrationTest {
 	private Result decide(String token,String code,String action,UUID key) throws Exception {
 		return send("POST","/api/v1/me/consents",Map.of("decisions",List.of(Map.of("code",code,"version",1,"action",action))),token,key);
 	}
+	@Test void homeGuestHasOnlyLoginReasonAndRequiresAuthentication() throws Exception {
+		for (String path:List.of("/api/v1/home","/api/v1/call-options"))
+			assertThat(send("GET",path,null,null,null).status()).isEqualTo(401);
+		var guest=send("POST","/api/v1/auth/guest",Map.of("installationId",UUID.randomUUID(),"platform","ANDROID","appVersion","1","osVersion","16","bootstrapSecret",Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[32])),null,UUID.randomUUID());
+		var result=send("GET","/api/v1/home",null,token(guest),null);
+		assertThat(result.status()).isEqualTo(200);
+		assertThat(result.body()).isEqualTo(mapper.readTree("{\"isMessageComposeEligible\":false,\"messageBlockReasons\":[\"LOGIN_REQUIRED\"],\"isLocationConsentGranted\":false,\"guardianCount\":0,\"settingsMode\":\"LOGIN_ONLY\"}"));
+		assertThat(result.headers().firstValue("Cache-Control")).contains("no-store");
+		assertThat(send("GET","/api/v1/call-options",null,token(guest),null).status()).isEqualTo(200);
+	}
+	@Test void homeEligibilityUsesCurrentPrivacyConsentAndContactCount() throws Exception {
+		var login=login("home-member"); String access=token(login);
+		var initial=send("GET","/api/v1/home",null,access,null);
+		assertThat(initial.body().path("messageBlockReasons")).isEqualTo(mapper.readTree("[\"ONBOARDING_REQUIRED\",\"PROFILE_REQUIRED\",\"CONSENT_REQUIRED\",\"CONTACT_REQUIRED\"]"));
+		assertThat(send("PUT","/api/v1/me/profile",profile(1),access,null).status()).isEqualTo(200);
+		var contact=send("POST","/api/v1/me/emergency-contacts",contact("01098765432"),access,UUID.randomUUID());
+		assertThat(contact.status()).isEqualTo(201);
+		assertThat(decide(access,"PRIVACY_PROCESSING","GRANTED",UUID.randomUUID()).status()).isEqualTo(200);
+		assertThat(decide(access,"LOCATION_PROCESSING","GRANTED",UUID.randomUUID()).status()).isEqualTo(200);
+		jdbc.update("UPDATE `deviceSession` SET `onboardingStep`='COMPLETE' WHERE `id`=?",bin(UUID.fromString(login.text("session","sessionId"))));
+		var ready=send("GET","/api/v1/home",null,access,null);
+		assertThat(ready.body().path("isMessageComposeEligible").asBoolean()).isTrue();
+		assertThat(ready.body().path("isLocationConsentGranted").asBoolean()).isTrue();
+		assertThat(ready.body().path("guardianCount").asInt()).isEqualTo(1);
+		// AI consent is deliberately absent: it must not gate message composition.
+		assertThat(ready.body().path("messageBlockReasons").size()).isZero();
+		jdbc.update("UPDATE `serviceDocument` SET `isCurrent`=0 WHERE `code`='PRIVACY_PROCESSING'");
+		jdbc.update("INSERT INTO `serviceDocument` (`code`,`version`,`title`,`body`,`isConsent`,`isRequired`,`isCurrent`,`publishedAt`) VALUES ('PRIVACY_PROCESSING',2,'synthetic','synthetic',1,1,1,?)",com.safecall.service.auth.repository.AuthRepository.time(START));
+		assertThat(send("GET","/api/v1/home",null,access,null).body().path("messageBlockReasons")).isEqualTo(mapper.readTree("[\"CONSENT_REQUIRED\"]"));
+		assertThat(send("DELETE","/api/v1/me/emergency-contacts/"+contact.text("id")+"?expectedVersion=1",null,access,UUID.randomUUID()).status()).isEqualTo(204);
+		assertThat(send("GET","/api/v1/home",null,access,null).body().path("guardianCount").asInt()).isZero();
+		assertThat(decide(access,"LOCATION_PROCESSING","DECLINED",UUID.randomUUID()).status()).isEqualTo(409);
+		assertThat(send("POST","/api/v1/me/consents/LOCATION_PROCESSING/withdraw",Map.of("version",1),access,UUID.randomUUID()).status()).isEqualTo(200);
+		assertThat(send("GET","/api/v1/home",null,access,null).body().path("isLocationConsentGranted").asBoolean()).isFalse();
+	}
+	private HttpResponse<String> options(String access,String etag) throws Exception {
+		var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/api/v1/call-options"));
+		if(access!=null) request.header("Authorization","Bearer "+access);
+		if(etag!=null) request.header("If-None-Match",etag);
+		return http.send(request.GET().build(),HttpResponse.BodyHandlers.ofString());
+	}
+	@Test void callCatalogRevalidatesContentAndExpiredSessions() throws Exception {
+		String access=token(login("catalog-member"));
+		var response=options(access,null);
+		assertThat(response.statusCode()).isEqualTo(200);
+		var body=mapper.readTree(response.body());
+		assertThat(body.path("scenarios").size()).isEqualTo(4);
+		assertThat(body.path("counterparts").size()).isEqualTo(3);
+		for(int i=0;i<4;i++) assertThat(body.path("scenarios").get(i).path("quickDirection").asString()).isEqualTo(List.of("UP","RIGHT","DOWN","LEFT").get(i));
+		assertThat(body.path("quickStart").path("holdMs").asInt()).isEqualTo(1000);
+		assertThat(body.path("quickStart").path("counterpartCode").asString()).isEqualTo("FATHER");
+		assertThat(body.path("catalogVersion").asInt()).isEqualTo(2);
+		String etag=response.headers().firstValue("ETag").orElseThrow();
+		assertThat(options(access,etag).statusCode()).isEqualTo(304);
+		assertThat(options(access,"W/"+etag).body()).isEmpty();
+		assertThat(options(null,etag).statusCode()).isEqualTo(401);
+		String oldLabel=body.path("scenarios").get(0).path("label").asString();
+		try {
+			jdbc.update("UPDATE `scenario` SET `label`='changed synthetic label' WHERE `sortOrder`=1");
+			assertThat(options(access,etag).statusCode()).isEqualTo(200);
+		} finally { jdbc.update("UPDATE `scenario` SET `label`=? WHERE `sortOrder`=1",oldLabel); }
+		when(clock.instant()).thenReturn(START.plusSeconds(901));
+		assertThat(options(access,etag).statusCode()).isEqualTo(401);
+		assertThat(send("GET","/api/v1/home",null,access,null).status()).isEqualTo(401);
+	}
+	@Test void homeAndCatalogRejectLoggedOutAndDeletionPendingMembers() throws Exception {
+		var login=login("home-deleted"); String access=token(login);
+		jdbc.update("UPDATE `appUser` SET `status`='DELETION_PENDING' WHERE `id`=?",bin(UUID.fromString(login.text("session","userId"))));
+		for (String path:List.of("/api/v1/home","/api/v1/call-options"))
+			assertThat(send("GET",path,null,access,null).text("code")).isEqualTo("ACCOUNT_DELETION_PENDING");
+		String other=token(login("home-logout"));
+		assertThat(send("POST","/api/v1/auth/logout",Map.of(),other,UUID.randomUUID()).status()).isEqualTo(204);
+		assertThat(send("GET","/api/v1/home",null,other,null).status()).isEqualTo(401);
+		assertThat(options(other,"*").statusCode()).isEqualTo(401);
+	}
+	@Test void homeOpenApiDocumentsAuthenticatedConditionalGet() throws Exception {
+		var document=send("GET","/v3/api-docs",null,null,null).body();
+		for(String path:List.of("/api/v1/home","/api/v1/call-options")) {
+			var operation=document.path("paths").path(path).path("get");
+			assertThat(operation.path("security").get(0).has("accessToken")).isTrue();
+		}
+		var options=document.path("paths").path("/api/v1/call-options").path("get");
+		assertThat(options.path("responses").has("304")).isTrue();
+		assertThat(options.path("parameters").toString()).contains("If-None-Match").doesNotContain("Authorization");
+	}
 	@Test void memberEndpointsRejectMissingAndGuestTokens() throws Exception {
 		var guest=send("POST","/api/v1/auth/guest",Map.of("installationId",UUID.randomUUID(),"platform","ANDROID","appVersion","1","osVersion","16","bootstrapSecret",Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[32])),null,UUID.randomUUID());
 		for(String path:List.of("profile","consents","emergency-contacts","settings")) {
