@@ -136,6 +136,10 @@ public class AuthRepository {
 			status, "REVOKED".equals(status) ? time(now) : null, bin(session.id()));
 		jdbc.update("UPDATE `sessionCredential` SET `consumedAt`=COALESCE(`consumedAt`,?) WHERE `sessionId`=?",
 			time(now), bin(session.id()));
+		endCalls(session, now, reason, eventHash);
+		jdbc.update("UPDATE `apiIdempotency` SET `responseCipher`=NULL WHERE `ownerSessionId`=?", bin(session.id()));
+	}
+	public void endCalls(Session session, Instant now, String reason, byte[] eventHash) {
 		var calls = jdbc.query("SELECT `id` FROM `callSession` WHERE `sessionId`=? AND `activeMarker`=1 FOR UPDATE",
 			(r,n) -> uuid(r,"id"), bin(session.id()));
 		for (UUID callId : calls) {
@@ -148,7 +152,6 @@ public class AuthRepository {
 				""", bin(UUID.randomUUID()), bin(callId), bin(UUID.randomUUID()), eventHash, time(now), time(now), bin(callId));
 			jdbc.update("UPDATE `connectionGrant` SET `status`='INVALIDATED',`tokenCipher`=NULL WHERE `callId`=?", bin(callId));
 		}
-		jdbc.update("UPDATE `apiIdempotency` SET `responseCipher`=NULL WHERE `ownerSessionId`=?", bin(session.id()));
 	}
 	public Replay replay(byte[] scopeHash, String operation, UUID key) {
 		return one("""

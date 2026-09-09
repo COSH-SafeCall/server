@@ -41,7 +41,7 @@ public class OpenApiConfiguration {
 			.description("A01/A02의 tokens.accessToken 또는 A03의 accessToken 값만 입력하세요. Bearer 접두사는 UI가 붙입니다."));
 		ModelConverters.getInstance().readAll(ErrorResponse.class).forEach(components::addSchemas);
 		return new OpenAPI().components(components).info(new Info().title("SafeCall API 테스트")
-			.version("2.1 / A01–A07")
+			.version("2.1 / A01–A07, U01–U12")
 			.description("""
 				구현된 인증·온보딩 API를 직접 테스트합니다.
 
@@ -54,7 +54,7 @@ public class OpenApiConfiguration {
 				예제의 고정 값은 합성 테스트용입니다. 실제 앱에서 공유하면 안 됩니다.
 
 				A02에는 해당 카카오 앱에서 발급한 실제 SDK access token이 필요합니다.
-				현재 2장 프로필 확인·동의 API가 없으므로 신규 회원은 PROFILE 이후 진행이 제한됩니다.
+				카카오 회원은 U02 프로필 확인, U08 연락처 등록(선택), U03/U05 문서 조회·동의를 A07 단계 진행과 함께 테스트합니다.
 				게스트는 PERMISSIONS → SOS_GUIDE → COMPLETE까지 테스트할 수 있습니다.
 				"""))
 			.tags(List.of(new Tag().name(AUTH_TAG).description("A01~A04: 발급·갱신·로그아웃"),

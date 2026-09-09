@@ -282,15 +282,29 @@ public class AuthTransactions {
 			|| !crypto.isEqual(current.accessHash(), accessHash(access))) throw new CustomException(ErrorCode.SESSION_EXPIRED);
 	}
 	private void ensureActive(Session session, Instant now) {
+		ensureActive(session, now, false);
+	}
+	private void ensureActive(Session session, Instant now, boolean isDeletionReplay) {
 		if (session == null || !"ACTIVE".equals(session.status())) throw new CustomException(ErrorCode.SESSION_EXPIRED);
 		if (!session.expiresAt().isAfter(now)) {
 			end(session, now, "EXPIRED", "SESSION_EXPIRED");
 			throw new SessionInvalidException(ErrorCode.SESSION_EXPIRED);
 		}
 		User user = repository.user(session.userId(), false);
-		if (session.userId() != null && (user == null || "DELETION_PENDING".equals(user.status()))) {
+		if (session.userId() != null && (user == null || (!isDeletionReplay && "DELETION_PENDING".equals(user.status())))) {
 			throw new CustomException(ErrorCode.ACCOUNT_DELETION_PENDING);
 		}
+	}
+	/** 계정 API도 인증과 동일한 회원 → 설치 → 세션 잠금 순서를 사용한다. */
+	public Session member(String access, boolean isDeletionReplay) {
+		Session session = repository.lockSession(tokens.verify(access));
+		Instant now = now();
+		ensureActive(session, now, isDeletionReplay);
+		Credential current = repository.currentCredential(session.id());
+		if (current == null || !current.accessExpiresAt().isAfter(now)
+			|| !crypto.isEqual(current.accessHash(), accessHash(access))) throw new CustomException(ErrorCode.SESSION_EXPIRED);
+		if (session.userId() == null) throw new CustomException(ErrorCode.LOGIN_REQUIRED);
+		return session;
 	}
 	private SessionView sessionView(Session session) {
 		User user = repository.user(session.userId(), false);
