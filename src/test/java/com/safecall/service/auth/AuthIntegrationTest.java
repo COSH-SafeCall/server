@@ -29,6 +29,7 @@ import com.safecall.service.auth.service.AuthMaintenance;
 import com.safecall.service.common.crypto.SecretCrypto;
 
 @Tag("mysql")
+@org.springframework.test.context.ActiveProfiles("local")
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT)
 class AuthIntegrationTest {
 	private static final Instant START = Instant.parse("2026-09-08T05:00:00Z");
