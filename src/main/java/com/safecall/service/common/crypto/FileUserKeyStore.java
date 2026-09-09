@@ -5,8 +5,10 @@ import java.nio.file.StandardOpenOption;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.context.annotation.Profile;
 
 @Component
+@Profile("local & !prod")
 public class FileUserKeyStore implements UserKeyStore {
 	private final Path directory;
 	private final SecretCrypto crypto;

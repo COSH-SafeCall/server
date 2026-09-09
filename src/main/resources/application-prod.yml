@@ -1,0 +1,14 @@
+# Deployment must explicitly set SPRING_PROFILES_ACTIVE=prod.
+# No local .env import or file-backed user key store is available in this profile.
+# Production startup remains blocked until an external UserKeyStore is implemented.
+spring:
+  datasource:
+    url: jdbc:mysql://${DB_HOST}:${DB_PORT:3306}/${DB_NAME:safecall}?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&characterEncoding=UTF-8&sslMode=VERIFY_IDENTITY
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

@@ -1,12 +1,9 @@
 spring:
   application:
     name: SafeCall_Service
-  config:
-    import: optional:file:.env[.properties]
+  profiles:
+    default: local
   datasource:
-    url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:safecall}?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&characterEncoding=UTF-8
-    username: ${DB_USERNAME:safecall_app}
-    password: ${DB_PASSWORD:}
     hikari:
       connection-init-sql: "SET SESSION time_zone = '+00:00', innodb_lock_wait_timeout = 1"
       connection-timeout: 3000
@@ -22,10 +19,8 @@ spring:
 
 springdoc:
   api-docs:
-    enabled: ${SWAGGER_ENABLED:true}
     version: OPENAPI_3_0
   swagger-ui:
-    enabled: ${SWAGGER_ENABLED:true}
     path: /swagger-ui.html
     try-it-out-enabled: true
     persist-authorization: false
@@ -53,13 +48,11 @@ app:
   crypto:
     hmac-secret: ${HMAC_SECRET:}
     response-secret: ${RESPONSE_ENCRYPTION_SECRET:}
-    key-directory: ${CRYPTO_KEY_DIRECTORY:.keys}
   oauth:
     kakao:
       app-id: ${KAKAO_APP_ID:0}
       client-id: ${KAKAO_CLIENT_ID:}
       client-secret: ${KAKAO_CLIENT_SECRET:}
-      redirect-uri: ${KAKAO_REDIRECT_URI:http://localhost:8081/login/oauth2/code/kakao}
   auth:
     requests-per-minute: ${AUTH_REQUESTS_PER_MINUTE:10}
     cleanup-delay-ms: ${AUTH_CLEANUP_DELAY_MS:1000}
