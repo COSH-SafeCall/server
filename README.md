@@ -41,7 +41,9 @@ A07 재시도는 같은 작업인지 먼저 검사하고 현재 온보딩 상태
 3. `.env.example`을 `.env`로 복사하고 DB 전용 계정·비밀번호, 독립된 세 키, 카카오 앱 번호를 입력한다.
 4. 서버 폴더에서 `./gradlew.bat bootRun`을 실행한다. 기본 포트는 8081이다.
 
-환경 변수는 `.env`에서 읽고 설정은 `application.yml`을 사용한다. JVM/OS 환경 변수로도 주입할 수 있다. `JWT_SECRET`은 32바이트 이상의 난수 기반 문자열, `HMAC_SECRET`과 `RESPONSE_ENCRYPTION_SECRET`은 각각 독립된 난수 32바이트의 Base64다. 빈 값·짧은 키·키 재사용은 시작 시 거절한다. 예제 파일에는 동작 가능한 비밀 값을 넣지 않았다.
+프로필 미지정 시 `local`로 실행하며, 공통 `application.yml`에 `application-local.yml`을 더해 `.env`를 읽는다. JVM/OS 환경 변수로도 주입할 수 있다. `JWT_SECRET`은 32바이트 이상의 난수 기반 문자열, `HMAC_SECRET`과 `RESPONSE_ENCRYPTION_SECRET`은 각각 독립된 난수 32바이트의 Base64다. 빈 값·짧은 키·키 재사용은 시작 시 거절한다. 예제 파일에는 동작 가능한 비밀 값을 넣지 않았다.
+
+AWS 실행 환경에는 `SPRING_PROFILES_ACTIVE=prod`를 명시한다. `application-prod.yml`은 `.env`를 자동으로 읽지 않고 Swagger를 비활성화하며 MySQL TLS 호스트 검증을 요구한다. 로컬 파일 키 저장소도 선택하지 않는다. **현재는 외부 사용자 키 저장소가 미구현이므로 운영 프로필 시작을 차단한다.** 배포 전 남은 작업과 환경별 차이는 [AWS 배포 준비 문서](docs/aws-deployment-readiness.md)를 따른다.
 
 `KAKAO_APP_ID`는 숫자 앱 번호다. `KAKAO_CLIENT_ID`인 REST API 키와 다르다. A02는 앱 SDK가 받은 access token을 검증하므로 서버 authorization-code 교환이나 callback을 구현하지 않는다. 앱 번호를 0으로 설정하면 A02는 `KAKAO_UNAVAILABLE`로 닫히며 게스트 개발은 가능하다.
 
@@ -53,7 +55,7 @@ HTTP는 로컬 개발용이다. 실제 서비스에서는 신뢰할 인입 계�
 
 로컬 DB와 `.env` 준비는 [로컬 MySQL 설정 가이드](docs/local-db-setup.md)를 따른다. A01~A07 수동 API 테스트는 [인증·세션·온보딩 Swagger 검수 가이드](docs/auth-session-onboarding-swagger-test.md)를 따른다. 서버 실행 후 [Swagger UI](http://localhost:8081/swagger-ui/index.html)에서 A01~A07을 실행할 수 있다. OpenAPI JSON은 `/v3/api-docs`로 제공한다. 설정은 [springdoc 공식 문서](https://springdoc.org/getting-started.html)의 Spring Boot 4용 3.1.1을 사용한다.
 
-2026-09-09 검증: 단위 테스트 10개와 MySQL HTTP 통합 테스트 34개, 총 **44개 통과**. 동시 가입/refresh 경쟁, 토큰 재사용 폐기의 커밋, 로그아웃 실패 롤백, 로그인 중 계정 삭제, 잘못된 요청의 공통 JSON 응답, Swagger 문서/UI와 요청 예제의 실제 호출을 포함한다.
+2026-09-09 검증: 단위·설정 테스트 17개와 MySQL HTTP 통합 테스트 34개, 총 **51개 통과**. 동시 가입/refresh 경쟁, 토큰 재사용 폐기의 커밋, 로그아웃 실패 롤백, 로그인 중 계정 삭제, 잘못된 요청의 공통 JSON 응답, Swagger 문서/UI와 요청 예제의 실제 호출을 포함한다. 환경 분리 시험에서는 로컬 키 유지, 운영의 `.env` 미사용, Swagger 기본 비활성화, 프로필 혼용 및 운영 키 저장소 미구현 시 시작 차단을 확인한다.
 
 외부 서비스나 MySQL 없이 실행하는 테스트:
 
