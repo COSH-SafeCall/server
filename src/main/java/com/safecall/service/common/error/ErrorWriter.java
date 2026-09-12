@@ -16,8 +16,8 @@ public class ErrorWriter {
 	private final JsonMapper mapper;
 	public ErrorWriter(Clock clock, JsonMapper mapper) { this.clock = clock; this.mapper = mapper; }
 	public ErrorResponse body(ErrorCode code, List<ErrorResponse.FieldError> errors, String path) {
-		return new ErrorResponse(LocalDateTime.now(clock).format(FORMAT), code.status(),
-			code.name(), code.message(), errors, path);
+		return new ErrorResponse(LocalDateTime.ofInstant(clock.instant(),java.time.ZoneOffset.UTC).format(FORMAT)+"Z", code.status(),
+			code.code(), code.message(), errors, path);
 	}
 	public void write(HttpServletRequest request, HttpServletResponse response, CustomException exception) throws IOException {
 		response.setStatus(exception.errorCode().status());

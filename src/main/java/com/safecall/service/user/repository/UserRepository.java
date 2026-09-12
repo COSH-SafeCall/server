@@ -34,11 +34,11 @@ public class UserRepository {
 		return jdbc.queryForObject("SELECT `phoneHash` FROM `appUser` WHERE `id`=?", byte[].class, bin(user));
 	}
 	public void updateProfile(UUID user, byte[] name, byte[] gender, byte[] birth, byte[] phone, byte[] phoneHash,
-		String genderSource, String birthSource, Instant now) {
+		String genderSource, String birthSource, Instant now,long expectedVersion) {
 		jdbc.update("""
 			UPDATE `appUser` SET `nameCipher`=?,`genderCipher`=?,`birthDateCipher`=?,`phoneCipher`=?,`phoneHash`=?,
-			`genderSource`=?,`birthDateSource`=?,`profileConfirmedAt`=?,`updatedAt`=?,`version`=`version`+1 WHERE `id`=?
-			""", name, gender, birth, phone, phoneHash, genderSource, birthSource, time(now), time(now), bin(user));
+			`genderSource`=?,`birthDateSource`=?,`profileConfirmedAt`=?,`updatedAt`=?,`version`=`version`+1 WHERE `id`=? AND `version`=?
+			""", name, gender, birth, phone, phoneHash, genderSource, birthSource, time(now), time(now), bin(user),expectedVersion);
 	}
 	public void createContact(UUID user, UUID contact, int slot, byte[] name, byte[] relationship, byte[] phone, byte[] hash, Instant now) {
 		jdbc.update("""
@@ -46,11 +46,11 @@ public class UserRepository {
 			VALUES (?,?,?,?,?,?,?,?,?)
 			""", bin(contact), bin(user), slot, name, relationship, phone, hash, time(now), time(now));
 	}
-	public void updateContact(UUID user, UUID contact, byte[] name, byte[] relationship, byte[] phone, byte[] hash, Instant now) {
+	public void updateContact(UUID user, UUID contact, byte[] name, byte[] relationship, byte[] phone, byte[] hash, Instant now,long expectedVersion) {
 		jdbc.update("""
 			UPDATE `emergencyContact` SET `nameCipher`=?,`relationshipCipher`=?,`phoneCipher`=?,`phoneHash`=?,
-			`updatedAt`=?,`version`=`version`+1 WHERE `id`=? AND `userId`=?
-			""", name, relationship, phone, hash, time(now), bin(contact), bin(user));
+			`updatedAt`=?,`version`=`version`+1 WHERE `id`=? AND `userId`=? AND `version`=?
+			""", name, relationship, phone, hash, time(now), bin(contact), bin(user),expectedVersion);
 	}
 	public void deleteContact(UUID user, UUID contact) {
 		jdbc.update("DELETE FROM `emergencyContact` WHERE `id`=? AND `userId`=?", bin(contact), bin(user));
@@ -59,14 +59,19 @@ public class UserRepository {
 		return jdbc.queryForObject("SELECT * FROM `userSetting` WHERE `userId`=?",
 			(r,n) -> new SettingView(AlertMode.valueOf(r.getString("incomingAlertMode")), r.getLong("version")), bin(user));
 	}
-	public void updateSettings(UUID user, AlertMode mode, Instant now) {
-		jdbc.update("UPDATE `userSetting` SET `incomingAlertMode`=?,`updatedAt`=?,`version`=`version`+1 WHERE `userId`=?",
-			mode.name(), time(now), bin(user));
+	public void updateSettings(UUID user, AlertMode mode, Instant now,long expectedVersion) {
+		jdbc.update("UPDATE `userSetting` SET `incomingAlertMode`=?,`updatedAt`=?,`version`=`version`+1 WHERE `userId`=? AND `version`=?",
+			mode.name(), time(now), bin(user),expectedVersion);
 	}
 	public List<Document> documents(boolean isLock) {
 		return jdbc.query("SELECT * FROM `serviceDocument` WHERE `isCurrent`=1 ORDER BY `code`" + (isLock ? " FOR SHARE" : ""),
 			(r,n) -> new Document(r.getString("code"),r.getInt("version"),r.getString("title"),r.getString("body"),
 				r.getBoolean("isConsent"),r.getBoolean("isRequired"),instant(r,"publishedAt")));
+	}
+	public Document document(String code,Integer version) {
+		var rows=jdbc.query("SELECT * FROM `serviceDocument` WHERE `code`=? AND "+(version==null?"`isCurrent`=1":"`version`=?"),
+			(r,n)->new Document(r.getString("code"),r.getInt("version"),r.getString("title"),r.getString("body"),r.getBoolean("isConsent"),r.getBoolean("isRequired"),instant(r,"publishedAt")),version==null?new Object[]{code}:new Object[]{code,version});
+		return rows.isEmpty()?null:rows.getFirst();
 	}
 	public Event latest(UUID user, String code) {
 		var rows = jdbc.query("""
@@ -87,7 +92,10 @@ public class UserRepository {
 		return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM `deletionJob` WHERE `userId`=? AND `scope`=? AND `pendingMarker`=1)",Boolean.class,bin(user),scope));
 	}
 	public List<UUID> sessions(UUID user) {
-		return jdbc.query("SELECT `id` FROM `deviceSession` WHERE `userId`=? ORDER BY `installationId`,`id`",(r,n) -> id(r,"id"),bin(user));
+		return jdbc.query("SELECT `id` FROM `webSession` WHERE `userId`=? ORDER BY `id`",(r,n) -> id(r,"id"),bin(user));
+	}
+	public DeletionView deletionView(UUID id) {
+		return jdbc.queryForObject("SELECT * FROM `deletionJob` WHERE `id`=?",(r,n)->new DeletionView(id,r.getString("scope"),r.getString("status"),instant(r,"requestedAt"),instant(r,"dueAt"),instant(r,"completedAt"),r.getString("errorCode")),bin(id));
 	}
 	public void deletion(UUID user, DeletionReceipt receipt, byte[] receiptHash, Instant now) {
 		jdbc.update("""

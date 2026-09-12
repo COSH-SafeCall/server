@@ -1,4 +1,4 @@
-"""Run auth HTTP tests on an isolated local MySQL instance, never the service DB."""
+"""Run web API chapters 0-4 unit and HTTP tests on an isolated local MySQL instance, never the service DB."""
 import argparse
 import os
 from pathlib import Path

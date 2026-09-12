@@ -19,7 +19,7 @@ import com.safecall.service.user.repository.UserRepository;
 @Transactional(isolation=Isolation.READ_COMMITTED, noRollbackFor=SessionInvalidException.class)
 public class HomeService {
 	// Fixed catalog deployment version; labels/order also participate in the response ETag.
-	private static final int CATALOG_VERSION=2;
+	private static final int CATALOG_VERSION=3;
 	private final AuthTransactions authentication;
 	private final AuthRepository auth;
 	private final UserRepository users;
@@ -30,14 +30,16 @@ public class HomeService {
 		this.authentication=authentication; this.auth=auth; this.users=users; this.repository=repository; this.clock=clock;
 	}
 	public HomeView home(String access) {
-		var session=authentication.session(access);
+		var session=authentication.authenticated(access);
 		if (session.userId()==null) return new HomeView(false,List.of("LOGIN_REQUIRED"),false,0,"LOGIN_ONLY");
 		var user=auth.user(session.userId(),false);
 		var reasons=new ArrayList<String>();
-		if (session.onboardingStep()!=Step.COMPLETE) reasons.add("ONBOARDING_REQUIRED");
+		if (session.step()!=Step.COMPLETE) reasons.add("ONBOARDING_REQUIRED");
 		if (user.confirmedAt()==null || user.nameCipher()==null || user.phoneCipher()==null) reasons.add("PROFILE_REQUIRED");
 		// Message eligibility requires privacy consent, independently of AI call consent.
 		if (!isGranted(user.id(),"PRIVACY_PROCESSING")) reasons.add("CONSENT_REQUIRED");
+		if(repository.hasOpenCall(session.id()))reasons.add("CALL_ALREADY_OPEN");
+		if(users.pending(user.id(),"ACCOUNT") || users.pending(user.id(),"AI_DATA") || users.pending(user.id(),"LOCATION_DATA"))reasons.add("DATA_CLEANUP_PENDING");
 		int count=repository.guardianCount(user.id());
 		if (count<1 || count>2) reasons.add("CONTACT_REQUIRED");
 		return new HomeView(reasons.isEmpty(),List.copyOf(reasons),isGranted(user.id(),"LOCATION_PROCESSING"),count,"MEMBER");
@@ -51,10 +53,10 @@ public class HomeService {
 	}
 	public CallOptionsView callOptions(String access) {
 		// Authenticate before the controller evaluates If-None-Match, including 304 requests.
-		authentication.session(access);
+		authentication.authenticated(access);
 		var scenarios=repository.scenarios();
 		var counterparts=repository.counterparts();
-		if (scenarios.size()!=4 || counterparts.size()!=3) throw new IllegalStateException("Incomplete call catalog.");
+		if (scenarios.size()!=4 || counterparts.size()!=3) throw new com.safecall.service.common.error.CustomException(com.safecall.service.common.error.ErrorCode.PROMPT_NOT_READY);
 		return new CallOptionsView(scenarios,counterparts,new QuickStart(1000,"FATHER"),CATALOG_VERSION);
 	}
 }
