@@ -15,7 +15,9 @@ import com.safecall.service.auth.repository.AuthRows.*;
 @Repository
 public class AuthRepository {
 	private final JdbcTemplate jdbc;
-	public AuthRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+	private final java.time.Clock clock;
+	private final com.safecall.service.common.crypto.TransientKeys keys;
+	public AuthRepository(JdbcTemplate jdbc,java.time.Clock clock,com.safecall.service.common.crypto.TransientKeys keys) { this.jdbc = jdbc; this.clock=clock;this.keys=keys; }
 	public static byte[] bin(UUID id) {
 		return id == null ? null : ByteBuffer.allocate(16).putLong(id.getMostSignificantBits()).putLong(id.getLeastSignificantBits()).array();
 	}
@@ -36,12 +38,9 @@ public class AuthRepository {
 		var result = jdbc.query(sql, mapper, args);
 		return result.isEmpty() ? null : result.getFirst();
 	}
-	private static final RowMapper<Session> SESSION = (r, n) -> new Session(uuid(r,"id"), uuid(r,"installationId"),
-		uuid(r,"userId"), r.getString("kind"), Step.valueOf(r.getString("onboardingStep")),
-		r.getLong("version"), r.getString("status"), instant(r,"createdAt"), instant(r,"expiresAt"));
-	private static final RowMapper<Credential> CREDENTIAL = (r, n) -> new Credential(uuid(r,"id"), uuid(r,"sessionId"),
-		r.getInt("generation"), r.getBytes("accessHash"), r.getBytes("refreshHash"),
-		instant(r,"accessExpiresAt"), instant(r,"refreshExpiresAt"), instant(r,"consumedAt"));
+	private static final RowMapper<Session> SESSION = (r,n) -> new Session(uuid(r,"id"), r.getBytes("sessionHash"),
+		r.getBytes("csrfHash"), uuid(r,"userId"), r.getString("kind"), Step.valueOf(r.getString("onboardingStep")),
+		r.getLong("version"), r.getString("status"), instant(r,"createdAt"), instant(r,"expiresAt"), instant(r,"sensitiveVerifiedAt"));
 	private static final RowMapper<User> USER = (r,n) -> new User(uuid(r,"id"), r.getString("status"), r.getString("keyRef"),
 		r.getBytes("nameCipher"), r.getBytes("genderCipher"), r.getBytes("birthDateCipher"), r.getBytes("phoneCipher"),
 		r.getString("genderSource"), r.getString("birthDateSource"), instant(r,"profileConfirmedAt"), r.getLong("version"));
@@ -68,74 +67,21 @@ public class AuthRepository {
 			gender == null ? "UNKNOWN" : "KAKAO", birthDate == null ? "UNKNOWN" : "KAKAO", time(now), time(now));
 		jdbc.update("INSERT INTO `userSetting` (`userId`,`updatedAt`) VALUES (?,?)", bin(id), time(now));
 	}
-	public UUID installation(byte[] hash, String appVersion, String osVersion, Instant now) {
-		// 유일 키의 upsert가 설치 생성 경쟁과 이후 세션 교체를 직렬화한다.
-		jdbc.update("""
-			INSERT INTO `deviceInstallation` (`id`,`installationHash`,`keyRef`,`appVersion`,`osVersion`,`createdAt`,`lastSeenAt`)
-			VALUES (?,?,'HMAC_V1',?,?,?,?) ON DUPLICATE KEY UPDATE `id`=`id`
-			""", bin(UUID.randomUUID()), hash, appVersion, osVersion, time(now), time(now));
-		return one("SELECT `id` FROM `deviceInstallation` WHERE `installationHash`=? FOR UPDATE",
-			(r,n) -> uuid(r,"id"), hash);
-	}
-	public void updateInstallation(UUID id, String appVersion, String osVersion, Instant now) {
-		jdbc.update("UPDATE `deviceInstallation` SET `appVersion`=?,`osVersion`=?,`lastSeenAt`=? WHERE `id`=?",
-			appVersion, osVersion, time(now), bin(id));
-	}
-	public Session session(UUID id) {
-		return one("SELECT * FROM `deviceSession` WHERE `id`=?", SESSION, bin(id));
-	}
+
+	public Session session(UUID id) { return one("SELECT * FROM `webSession` WHERE `id`=?",SESSION,bin(id)); }
+	public Session byCookie(byte[] hash) { return one("SELECT * FROM `webSession` WHERE `sessionHash`=?",SESSION,hash); }
 	public Session lockSession(UUID id) {
-		Session snapshot = session(id);
-		if (snapshot == null) return null;
-		// 동일한 잠금 순서: 회원 → 설치 → 세션 → credential → 통화.
-		user(snapshot.userId(), true);
-		jdbc.queryForList("SELECT `id` FROM `deviceInstallation` WHERE `id`=? FOR UPDATE", bin(snapshot.installationId()));
-		return one("SELECT * FROM `deviceSession` WHERE `id`=? FOR UPDATE", SESSION, bin(id));
+		Session snapshot=session(id); if(snapshot==null)return null;
+		user(snapshot.userId(),true);
+		return one("SELECT * FROM `webSession` WHERE `id`=? FOR UPDATE",SESSION,bin(id));
 	}
-	public Session activeSession(UUID installationId) {
-		return one("SELECT * FROM `deviceSession` WHERE `installationId`=? AND `status`='ACTIVE' FOR UPDATE",
-			SESSION, bin(installationId));
-	}
-	public void createSession(UUID id, UUID installationId, UUID userId, Instant now, Instant expiry) {
-		jdbc.update("""
-			INSERT INTO `deviceSession` (`id`,`installationId`,`userId`,`kind`,`onboardingStep`,`createdAt`,`expiresAt`)
-			VALUES (?,?,?,?,?,?,?)
-			""", bin(id), bin(installationId), bin(userId), userId == null ? "GUEST" : "KAKAO",
-			userId == null ? "PERMISSIONS" : "PROFILE", time(now), time(expiry));
-	}
-	public Credential credentialByRefresh(byte[] hash) {
-		return one("SELECT * FROM `sessionCredential` WHERE `refreshHash`=?", CREDENTIAL, hash);
-	}
-	public Credential credentialByAccess(byte[] hash) {
-		return one("SELECT * FROM `sessionCredential` WHERE `accessHash`=?", CREDENTIAL, hash);
-	}
-	public Credential credential(UUID id) {
-		return one("SELECT * FROM `sessionCredential` WHERE `id`=? FOR UPDATE", CREDENTIAL, bin(id));
-	}
-	public Credential currentCredential(UUID sessionId) {
-		return one("SELECT * FROM `sessionCredential` WHERE `sessionId`=? AND `consumedAt` IS NULL FOR UPDATE",
-			CREDENTIAL, bin(sessionId));
-	}
-	public UUID insertCredential(Tokens tokens, int generation, byte[] accessHash, byte[] refreshHash, Instant now) {
-		UUID id = UUID.randomUUID();
-		jdbc.update("""
-			INSERT INTO `sessionCredential` (`id`,`sessionId`,`generation`,`accessHash`,`refreshHash`,
-			`accessExpiresAt`,`refreshExpiresAt`,`createdAt`) VALUES (?,?,?,?,?,?,?,?)
-			""", bin(id), bin(tokens.sessionId()), generation, accessHash, refreshHash,
-			time(tokens.accessExpiresAt()), time(tokens.refreshExpiresAt()), time(now));
-		return id;
-	}
-	public void consume(UUID credentialId, Instant now) {
-		jdbc.update("UPDATE `sessionCredential` SET `consumedAt`=? WHERE `id`=? AND `consumedAt` IS NULL", time(now), bin(credentialId));
-	}
-	public void extend(UUID id, Instant expiry) {
-		jdbc.update("UPDATE `deviceSession` SET `expiresAt`=? WHERE `id`=?", time(expiry), bin(id));
+	public void createSession(UUID id,UUID user,String kind,Step step,byte[] hash,byte[] csrf,Instant now,Instant expiry,Instant verified) {
+		jdbc.update("INSERT INTO `webSession` (`id`,`sessionHash`,`csrfHash`,`userId`,`kind`,`onboardingStep`,`createdAt`,`expiresAt`,`sensitiveVerifiedAt`) VALUES (?,?,?,?,?,?,?,?,?)",
+			bin(id),hash,csrf,bin(user),kind,step.name(),time(now),time(expiry),time(verified));
 	}
 	public void endSession(Session session, Instant now, String status, String reason, byte[] eventHash) {
-		jdbc.update("UPDATE `deviceSession` SET `status`=?,`revokedAt`=? WHERE `id`=?",
+		jdbc.update("UPDATE `webSession` SET `status`=?,`revokedAt`=? WHERE `id`=?",
 			status, "REVOKED".equals(status) ? time(now) : null, bin(session.id()));
-		jdbc.update("UPDATE `sessionCredential` SET `consumedAt`=COALESCE(`consumedAt`,?) WHERE `sessionId`=?",
-			time(now), bin(session.id()));
 		endCalls(session, now, reason, eventHash);
 		jdbc.update("UPDATE `apiIdempotency` SET `responseCipher`=NULL WHERE `ownerSessionId`=?", bin(session.id()));
 	}
@@ -150,10 +96,12 @@ public class AuthRepository {
 				INSERT INTO `callEvent` (`id`,`callId`,`sequence`,`eventKey`,`requestHash`,`eventType`,`stateAfter`,`occurredAt`,`recordedAt`)
 				SELECT ?,?,COALESCE(MAX(`sequence`),0)+1,?,?,'ENDED','ENDED',?,? FROM `callEvent` WHERE `callId`=?
 				""", bin(UUID.randomUUID()), bin(callId), bin(UUID.randomUUID()), eventHash, time(now), time(now), bin(callId));
-			jdbc.update("UPDATE `connectionGrant` SET `status`='INVALIDATED',`tokenCipher`=NULL WHERE `callId`=?", bin(callId));
+			jdbc.queryForList("SELECT `keyRef` FROM `connectionGrant` WHERE `callId`=? AND `keyRef` IS NOT NULL",String.class,bin(callId)).forEach(keys::discardAfterCommit);
+			jdbc.update("UPDATE `connectionGrant` SET `status`='INVALIDATED',`tokenCipher`=NULL,`keyRef`=NULL WHERE `callId`=? AND `status` IN ('PENDING','ISSUING','READY')", bin(callId));
 		}
 	}
 	public Replay replay(byte[] scopeHash, String operation, UUID key) {
+		jdbc.update("DELETE FROM `apiIdempotency` WHERE `scopeHash`=? AND `operation`=? AND `requestKey`=? AND `expiresAt`<=?",scopeHash,operation,bin(key),time(clock.instant()));
 		return one("""
 			SELECT * FROM `apiIdempotency` WHERE `scopeHash`=? AND `operation`=? AND `requestKey`=? FOR UPDATE
 			""", (r,n) -> new Replay(uuid(r,"id"), uuid(r,"ownerSessionId"), uuid(r,"resourceId"),
@@ -181,7 +129,7 @@ public class AuthRepository {
 			""", Boolean.class, code, bin(userId)))).toList();
 	}
 	public void advance(Session session, Step next, Instant now) {
-		jdbc.update("UPDATE `deviceSession` SET `onboardingStep`=?,`version`=`version`+1 WHERE `id`=?", next.name(), bin(session.id()));
+		jdbc.update("UPDATE `webSession` SET `onboardingStep`=?,`version`=`version`+1 WHERE `id`=? AND `version`=?", next.name(), bin(session.id()),session.version());
 		if (next == Step.COMPLETE && session.userId() != null) {
 			jdbc.update("UPDATE `appUser` SET `status`='ACTIVE',`updatedAt`=?,`version`=`version`+1 WHERE `id`=?",
 				time(now), bin(session.userId()));
@@ -189,9 +137,9 @@ public class AuthRepository {
 	}
 	public void observe(Session session, String category, String code, Boolean isSuccess, Instant now) {
 		jdbc.update("""
-			INSERT INTO `operationEvent` (`id`,`userId`,`sessionId`,`eventKey`,`category`,`code`,`isSuccess`,`occurredAt`,`recordedAt`)
-			VALUES (?,?,?,?,?,?,?,?,?)
-			""", bin(UUID.randomUUID()), bin(session.userId()), bin(session.id()), bin(UUID.randomUUID()),
+			INSERT INTO `operationEvent` (`id`,`sessionId`,`eventKey`,`category`,`code`,`isSuccess`,`occurredAt`,`recordedAt`)
+			VALUES (?,?,?,?,?,?,?,?)
+			""", bin(UUID.randomUUID()), bin(session.id()), bin(UUID.randomUUID()),
 			category, code, isSuccess, time(now), time(now));
 	}
 	public int countAttempt(byte[] hash, Instant window, Instant expiry) {
@@ -208,10 +156,12 @@ public class AuthRepository {
 		jdbc.update("UPDATE `apiIdempotency` SET `responseCipher`=NULL WHERE `responseExpiresAt`<=? AND `responseCipher` IS NOT NULL", time(now));
 		jdbc.update("DELETE FROM `apiIdempotency` WHERE `expiresAt`<=?", time(now));
 		jdbc.update("DELETE FROM `rateBucket` WHERE `expiresAt`<=?", time(now));
-		jdbc.update("DELETE FROM `sessionCredential` WHERE `refreshExpiresAt`<=? AND `consumedAt` IS NOT NULL", time(now));
+		jdbc.update("UPDATE `oauthAttempt` SET `status`='EXPIRED',`completedAt`=? WHERE `status`='PENDING' AND `expiresAt`<=?",time(now),time(now));
+		jdbc.update("UPDATE `oauthAttempt` SET `status`='FAILED',`completedAt`=? WHERE `status`='EXCHANGING' AND `expiresAt`<=?",time(now),time(now));
+		jdbc.update("DELETE FROM `oauthAttempt` WHERE `status` IN ('SUCCEEDED','FAILED','EXPIRED') AND `expiresAt`<=?",time(now));
 	}
 	public List<UUID> expiredSessions(Instant now) {
-		return jdbc.query("SELECT `id` FROM `deviceSession` WHERE `status`='ACTIVE' AND `expiresAt`<=? ORDER BY `expiresAt` LIMIT 100",
+		return jdbc.query("SELECT `id` FROM `webSession` WHERE `status`='ACTIVE' AND `expiresAt`<=? ORDER BY `expiresAt` LIMIT 100",
 			(r,n) -> uuid(r,"id"), time(now));
 	}
 }

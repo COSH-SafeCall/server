@@ -15,6 +15,3 @@ springdoc:
 app:
   crypto:
     key-directory: ${CRYPTO_KEY_DIRECTORY:.keys}
-  oauth:
-    kakao:
-      redirect-uri: ${KAKAO_REDIRECT_URI:http://localhost:8081/login/oauth2/code/kakao}

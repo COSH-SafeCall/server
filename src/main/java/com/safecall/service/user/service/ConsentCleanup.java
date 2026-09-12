@@ -11,7 +11,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import com.safecall.service.auth.repository.AuthRepository;
 
-/** 계정 삭제는 6장 worker에 맡기고, 동의 철회의 AI/위치 정리만 처리한다. */
+/** AI/위치 동의 철회 정리. ACCOUNT 로컬 정리는 AccountLocalCleanup이 담당한다. */
 @Component
 public class ConsentCleanup {
 	private final JdbcTemplate jdbc;
@@ -35,11 +35,11 @@ public class ConsentCleanup {
 				var locked=jdbc.queryForList("SELECT `pendingMarker` FROM `deletionJob` WHERE `id`=? FOR UPDATE",id);
 				if (locked.isEmpty() || locked.getFirst().get("pendingMarker")==null) return;
 				if (job.get("scope").equals("AI_DATA")) {
-					jdbc.update("DELETE FROM `callSession` WHERE `sessionId` IN (SELECT `id` FROM `deviceSession` WHERE `userId`=?)",bin(user));
-					jdbc.update("DELETE FROM `operationEvent` WHERE `userId`=? AND `category` IN ('CALL','AUDIO')",bin(user));
+					jdbc.update("DELETE FROM `callSession` WHERE `sessionId` IN (SELECT `id` FROM `webSession` WHERE `userId`=?)",bin(user));
+					jdbc.update("DELETE FROM `operationEvent` WHERE `sessionId` IN (SELECT `id` FROM `webSession` WHERE `userId`=?) AND `category` IN ('CALL','AUDIO')",bin(user));
 					jdbc.update("UPDATE `appUser` SET `genderCipher`=NULL,`birthDateCipher`=NULL,`genderSource`='UNKNOWN',`birthDateSource`='UNKNOWN',`version`=`version`+1,`updatedAt`=? WHERE `id`=?",time(clock.instant()),bin(user));
 				}
-				jdbc.update("UPDATE `deletionJob` SET `status`='COMPLETED',`completedAt`=?,`cleanupCipher`=NULL WHERE `id`=?",time(clock.instant()),id);
+				jdbc.update("UPDATE `deletionJob` SET `status`='COMPLETED',`completedAt`=?,`cleanupCipher`=NULL,`cleanupKeyRef`=NULL WHERE `id`=?",time(clock.instant()),id);
 			});
 		} catch (RuntimeException exception) {
 			org.slf4j.LoggerFactory.getLogger(getClass()).error("Consent cleanup failed; retrying next cycle.");

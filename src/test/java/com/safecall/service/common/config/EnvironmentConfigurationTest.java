@@ -19,7 +19,7 @@ class EnvironmentConfigurationTest {
 			.withPropertyValues("spring.config.location=classpath:/",
 				"spring.profiles.active=", "DB_HOST=synthetic-db.example", "DB_USERNAME=synthetic-user",
 				"DB_PASSWORD=synthetic-password", "SWAGGER_ENABLED=true",
-				"app.jwt.secret=synthetic-independent-signing-key-at-least-32-bytes",
+				"app.crypto.csrf-secret=ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA=",
 				"app.crypto.hmac-secret=" + Base64.getEncoder().encodeToString(new byte[32]),
 				"app.crypto.response-secret=" + Base64.getEncoder().encodeToString("0123456789abcdef0123456789abcdef".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
 				"app.crypto.key-directory=" + keys);

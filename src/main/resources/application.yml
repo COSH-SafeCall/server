@@ -39,20 +39,34 @@ server:
     include-stacktrace: never
 
 app:
-  jwt:
-    secret: ${JWT_SECRET:}
-    issuer: ${JWT_ISSUER:safecall}
-    audience: ${JWT_AUDIENCE:safecall-android}
-    access-expiration: ${JWT_ACCESS_EXPIRATION:900000}
-    refresh-expiration: ${JWT_REFRESH_EXPIRATION:1209600000}
+  web:
+    origin: ${WEB_ORIGIN:http://localhost:8081}
   crypto:
     hmac-secret: ${HMAC_SECRET:}
+    csrf-secret: ${CSRF_SECRET:}
     response-secret: ${RESPONSE_ENCRYPTION_SECRET:}
   oauth:
     kakao:
       app-id: ${KAKAO_APP_ID:0}
       client-id: ${KAKAO_CLIENT_ID:}
       client-secret: ${KAKAO_CLIENT_SECRET:}
+      redirect-uri: ${KAKAO_REDIRECT_URI:http://localhost:8081/api/v1/auth/kakao/callback}
+      login-scopes: ${KAKAO_LOGIN_SCOPES:name,gender,birthday,birthyear,phone_number}
   auth:
     requests-per-minute: ${AUTH_REQUESTS_PER_MINUTE:10}
     cleanup-delay-ms: ${AUTH_CLEANUP_DELAY_MS:1000}
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    token-url: ${GEMINI_EPHEMERAL_TOKEN_URL:https://generativelanguage.googleapis.com/v1beta/auth_tokens}
+    connection-ttl-seconds: ${SAFECALL_GEMINI_CONNECTION_TTL_SECONDS:600}
+    new-session-ttl-seconds: ${SAFECALL_GEMINI_NEW_SESSION_TTL_SECONDS:60}
+    validated-model: ${GEMINI_VALIDATED_MODEL:}
+    validation-ref: ${GEMINI_VALIDATION_REF:}
+    model-max-seconds: ${GEMINI_MODEL_MAX_SECONDS:0}
+  call:
+    policy-version: ${CALL_POLICY_VERSION:mvp-2026-09-11}
+    max-resume-attempts: ${CALL_MAX_RESUME_ATTEMPTS:1}
+    resume-delay-ms: ${CALL_RESUME_DELAY_MS:1000}
+    lease-seconds: ${CALL_LEASE_SECONDS:30}
+    issue-timeout-seconds: ${CALL_ISSUE_TIMEOUT_SECONDS:10}
+    worker-delay-ms: ${CALL_WORKER_DELAY_MS:1000}

@@ -11,6 +11,7 @@ import com.safecall.service.home.api.HomeDtos.*;
 public class HomeRepository {
 	private final JdbcTemplate jdbc;
 	public HomeRepository(JdbcTemplate jdbc) { this.jdbc=jdbc; }
+	public boolean hasOpenCall(UUID session) {return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM `callSession` WHERE `sessionId`=? AND `activeMarker`=1)",Boolean.class,bin(session)));}
 	public int guardianCount(UUID userId) {
 		return jdbc.queryForObject("SELECT COUNT(*) FROM `emergencyContact` WHERE `userId`=?",Integer.class,bin(userId));
 	}

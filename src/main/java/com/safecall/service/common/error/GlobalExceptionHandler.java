@@ -37,6 +37,12 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler({HttpMessageNotReadableException.class, ServletRequestBindingException.class,
 		MethodArgumentTypeMismatchException.class, HandlerMethodValidationException.class})
 	public ResponseEntity<ErrorResponse> malformed(Exception exception, HttpServletRequest request) {
+		for (Throwable cause=exception; cause!=null; cause=cause.getCause()) {
+			if(cause instanceof CustomException business)return business(business,request);
+			if(cause instanceof tools.jackson.databind.exc.InvalidFormatException format
+				&& format.getTargetType()==com.safecall.service.user.api.UserDtos.AlertMode.class)
+				return response(ErrorCode.INVALID_ALERT_MODE,request);
+		}
 		return response(ErrorCode.INVALID_REQUEST, request);
 	}
 	@ExceptionHandler({NoResourceFoundException.class, NoHandlerFoundException.class})

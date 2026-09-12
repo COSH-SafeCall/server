@@ -18,8 +18,9 @@ public final class UserValues {
 		return normalized;
 	}
 	public static String phone(String value) {
-		if (value == null || !value.matches("[0-9 -]+")) throw new CustomException(ErrorCode.INVALID_PHONE);
+		if (value == null || !value.matches("[+0-9 -]+")) throw new CustomException(ErrorCode.INVALID_PHONE);
 		String normalized = value.replace(" ", "").replace("-", "");
+		if(normalized.startsWith("+82"))normalized="0"+normalized.substring(3);
 		if (!normalized.matches("010[0-9]{8}")) throw new CustomException(ErrorCode.INVALID_PHONE);
 		return normalized;
 	}
