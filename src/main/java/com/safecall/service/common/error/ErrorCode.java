@@ -9,6 +9,8 @@ public enum ErrorCode {
 	INVALID_CONSENT(422,"동의 코드와 고정 발행 버전을 확인해 주세요."),
 	DOCUMENT_NOT_READY(503,"문서가 아직 발행되지 않았습니다."),
 	PROFILE_REQUIRED(422,"이름과 전화번호를 확인해 주세요."),
+	MESSAGE_PROFILE_REQUIRED(409,"이름과 전화번호를 확인해 주세요."),
+	CONTACT_REQUIRED(409,"비상 연락망을 등록해 주세요."),
 	CONTACT_PHONE_CONFLICT(409,"본인 또는 다른 보호자와 같은 번호입니다."),
 	INVALID_ALERT_MODE(422,"지원하지 않는 알림 모드입니다."),
 	BUSINESS_VALIDATION_FAILED(422,"입력값을 확인해 주세요."),
@@ -69,7 +71,13 @@ public enum ErrorCode {
 	private final int status;
 	private final String message;
 	ErrorCode(int status, String message) { this.status = status; this.message = message; }
-	public String code() { return this==BUSINESS_VALIDATION_FAILED ? "VALIDATION_FAILED" : name(); }
+	public String code() {
+		return switch (this) {
+			case BUSINESS_VALIDATION_FAILED -> "VALIDATION_FAILED";
+			case MESSAGE_PROFILE_REQUIRED -> "PROFILE_REQUIRED";
+			default -> name();
+		};
+	}
 	public int status() { return status; }
 	public String message() { return message; }
 }
