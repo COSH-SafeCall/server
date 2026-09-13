@@ -41,6 +41,7 @@ class WebIntegrationTest {
 	@Autowired com.safecall.service.history.service.UsageHistoryCleanup historyCleanup;
 	@Autowired com.safecall.service.history.service.AccountExternalCleanup externalCleanup;
 	@MockitoBean KakaoUnlinkClient unlink;
+	@MockitoSpyBean com.safecall.service.telemetry.service.TelemetryPolicy telemetryPolicy;
 	private final HttpClient http=HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
 	@DynamicPropertySource static void config(DynamicPropertyRegistry r){
 		String url=System.getenv("AUTH_TEST_DB_URL");
@@ -51,6 +52,7 @@ class WebIntegrationTest {
 		r.add("app.crypto.csrf-secret",()->Base64.getEncoder().encodeToString("fedcba9876543210fedcba9876543210".getBytes()));
 		r.add("app.crypto.key-directory",()->System.getenv("AUTH_TEST_KEY_DIRECTORY"));
 		r.add("app.web.origin",()->ORIGIN);r.add("app.oauth.kakao.redirect-uri",()->ORIGIN+"/api/v1/auth/kakao/callback");
+		r.add("app.telemetry.web-version",()->"synthetic-web-v7");
 		r.add("app.oauth.kakao.client-id",()->"synthetic-client");r.add("app.oauth.kakao.app-id",()->123);
 		r.add("app.gemini.connection-ttl-seconds",()->600);
 		r.add("app.gemini.validated-model",()->"models/synthetic-live");r.add("app.gemini.validation-ref",()->"synthetic-test-only");r.add("app.gemini.model-max-seconds",()->600);
@@ -113,6 +115,176 @@ class WebIntegrationTest {
 	Result end(Browser b,UUID id)throws Exception{return send("POST","/api/v1/calls/"+id+"/end",Map.of("reason","TAB_HIDDEN","occurredAt",clock.instant().toString()),b,UUID.randomUUID());}
 	Result renew(Browser b,UUID id,String grant,UUID key)throws Exception{return send("POST","/api/v1/calls/"+id+"/connection-renewals",Map.of("previousGrantId",grant,"reason","GO_AWAY","isResumable",true),b,key);}
 	long count(String table){return jdbc.queryForObject("SELECT COUNT(*) FROM `"+table+"`",Long.class);}
+
+	Map<String,Object> telemetryEvent(String category,String code) {
+		return new HashMap<>(Map.of("eventId",UUID.randomUUID(),"category",category,"code",code,"occurredAt",clock.instant().toString()));
+	}
+	Result telemetry(Browser b,List<?> events)throws Exception { return send("POST","/api/v1/telemetry/events",Map.of("events",events),b,null); }
+	long telemetryCount() { return jdbc.queryForObject("SELECT COUNT(*) FROM `operationEvent` WHERE `category`<>'AUTH'",Long.class); }
+	int telemetryRate() { return jdbc.queryForObject("SELECT COALESCE(SUM(`usedCount`),0) FROM `rateBucket` WHERE `operation`='TELEMETRY'",Integer.class); }
+	void eventCounts(Result result,int accepted,int duplicate) {
+		status(result,202);assertThat(result.body().properties()).hasSize(2);
+		assertThat(result.body().path("acceptedCount").asInt()).isEqualTo(accepted);
+		assertThat(result.body().path("duplicateCount").asInt()).isEqualTo(duplicate);
+	}
+	@Test void telemetryAcceptsGuestsAndMembersBeforeOnboardingWithoutChangingState()throws Exception {
+		Browser member=member(),guest=guest();String step=send("GET","/api/v1/onboarding",null,member,null).text("step");
+		var event=telemetryEvent("MESSAGE_COMPOSER","COMPOSER_OPENED");event.put("isSuccess",true);event.put("latencyMs",3600000);event.put("networkType","UNKNOWN");
+		for(Browser browser:List.of(member,guest)) {
+			var result=telemetry(browser,List.of(event));eventCounts(result,1,0);
+			assertThat(result.headers().firstValue("Cache-Control")).contains("no-store");
+		}
+		assertThat(telemetryCount()).isEqualTo(2);assertThat(telemetryRate()).isEqualTo(2);
+		assertThat(jdbc.queryForList("SELECT `webVersion` FROM `operationEvent` WHERE `category`<>'AUTH'",String.class)).containsOnly("synthetic-web-v7");
+		assertThat(send("GET","/api/v1/onboarding",null,member,null).text("step")).isEqualTo(step);assertThat(count("callSession")).isZero();
+	}
+	@Test void telemetryRequiresAuthenticatedSessionOriginAndCsrf()throws Exception {
+		Browser anonymous=bootstrap(),b=guest();var batch=List.of(telemetryEvent("SOS","SOS_GUIDE_VIEWED"));String body=mapper.writeValueAsString(Map.of("events",batch));
+		code(telemetry(anonymous,batch),401,"AUTHENTICATION_REQUIRED");code(telemetry(null,batch),403,"CSRF_INVALID");
+		code(raw("POST","/api/v1/telemetry/events",body,b,null,null,b.csrf,null),403,"ORIGIN_NOT_ALLOWED");
+		code(raw("POST","/api/v1/telemetry/events",body,b,null,ORIGIN,"wrong",null),403,"CSRF_INVALID");
+		status(send("POST","/api/v1/auth/logout",Map.of(),b,null),204);status(telemetry(b,batch),401);
+		assertThat(telemetryCount()).isZero();assertThat(telemetryRate()).isZero();
+	}
+	@Test void telemetryRejectsExpiredAndAccountDeletionPendingSessions()throws Exception {
+		Browser b=guest();var batch=List.of(telemetryEvent("FALLBACK","FALLBACK_STARTED"));
+		clock.advance(86400);code(telemetry(b,batch),401,"SESSION_EXPIRED");
+		Browser member=member();login(member,"REAUTH",false);status(deletion(member,"ACCOUNT",UUID.randomUUID()),202);
+		code(telemetry(member,batch),409,"ACCOUNT_DELETION_PENDING");assertThat(telemetryCount()).isZero();
+	}
+	@Test void telemetryAcceptsEveryPublicCodeAndRejectsServerOnlyOrMismatchedCodes()throws Exception {
+		Browser b=guest();var codes=Map.of(
+			"PERMISSION",List.of("MICROPHONE_PERMISSION_REVIEWED","LOCATION_PERMISSION_REVIEWED","PERMISSION_QUERY_UNAVAILABLE"),
+			"CALL",List.of("LIVE_CONNECT_STARTED","LIVE_CONNECT_SUCCEEDED","LIVE_CONNECT_FAILED","RINGING_SHOWN","RINGING_FAILED","PAGE_EXITED","PAGE_RELOADED","LIVE_RESUME_STARTED","LIVE_RESUME_SUCCEEDED","LIVE_RESUME_FAILED"),
+			"AUDIO",List.of("FIRST_AUDIO_PLAYED","AUDIO_INTERRUPTED"),"GESTURE",List.of("QUICK_START_SELECTED","QUICK_START_CANCELLED"),
+			"LOCATION",List.of("LOCATION_AVAILABLE","LOCATION_UNAVAILABLE"),"MESSAGE_COMPOSER",List.of("COMPOSER_OPENED","COMPOSER_OPEN_FAILED"),
+			"SOS",List.of("SOS_GUIDE_VIEWED","SOS_GUIDE_FAILED"),"FALLBACK",List.of("FALLBACK_STARTED","FALLBACK_ENDED"));
+		for(var category:codes.entrySet()) {
+			var batch=category.getValue().stream().map(code->telemetryEvent(category.getKey(),code)).toList();eventCounts(telemetry(b,batch),batch.size(),0);
+		}
+		for(var invalid:List.of(telemetryEvent("AUTH","AUTH_SUCCEEDED"),telemetryEvent("CALL","COMPOSER_OPENED"),telemetryEvent("CUSTOM","CUSTOM")))
+			code(telemetry(b,List.of(telemetryEvent("SOS","SOS_GUIDE_VIEWED"),invalid)),422,"INVALID_EVENT");
+		assertThat(telemetryCount()).isEqualTo(25);assertThat(telemetryRate()).isEqualTo(25);
+	}
+	@Test void telemetryValidatesOutcomeMeaningAndNetworkAllowlist()throws Exception {
+		Browser b=guest();
+		for(var pair:List.of(List.of("CALL","LIVE_CONNECT_SUCCEEDED"),List.of("CALL","RINGING_SHOWN"),List.of("CALL","LIVE_RESUME_SUCCEEDED"),List.of("AUDIO","FIRST_AUDIO_PLAYED"),List.of("LOCATION","LOCATION_AVAILABLE"),List.of("MESSAGE_COMPOSER","COMPOSER_OPENED"),List.of("SOS","SOS_GUIDE_VIEWED"))) {
+			var event=telemetryEvent(pair.get(0),pair.get(1));event.put("isSuccess",false);code(telemetry(b,List.of(event)),422,"INVALID_EVENT");
+			event.put("isSuccess",true);eventCounts(telemetry(b,List.of(event)),1,0);
+		}
+		for(var pair:List.of(List.of("PERMISSION","PERMISSION_QUERY_UNAVAILABLE"),List.of("CALL","LIVE_CONNECT_FAILED"),List.of("CALL","RINGING_FAILED"),List.of("CALL","LIVE_RESUME_FAILED"),List.of("LOCATION","LOCATION_UNAVAILABLE"),List.of("MESSAGE_COMPOSER","COMPOSER_OPEN_FAILED"),List.of("SOS","SOS_GUIDE_FAILED"))) {
+			var event=telemetryEvent(pair.get(0),pair.get(1));event.put("isSuccess",true);code(telemetry(b,List.of(event)),422,"INVALID_EVENT");
+			event.put("isSuccess",false);eventCounts(telemetry(b,List.of(event)),1,0);
+		}
+		for(String network:List.of("WIFI","CELLULAR","OFFLINE","UNKNOWN","5G")) {
+			var event=telemetryEvent("CALL","PAGE_EXITED");event.put("networkType",network);
+			if(network.equals("5G"))code(telemetry(b,List.of(event)),422,"INVALID_EVENT");else eventCounts(telemetry(b,List.of(event)),1,0);
+		}
+		// 사용자 끼어들기 등 정상 중단도 있으므로 오디오 중단 자체를 실패로 단정하지 않는다.
+		for(Boolean outcome:Arrays.asList(true,false,null)) {
+			var event=telemetryEvent("AUDIO","AUDIO_INTERRUPTED");event.put("isSuccess",outcome);eventCounts(telemetry(b,List.of(event)),1,0);
+		}
+	}
+	@Test void telemetryRejectsInvalidShapesAndNeverCoercesIntegerBooleanOrTimestamp()throws Exception {
+		Browser b=guest();var valid=telemetryEvent("CALL","LIVE_CONNECT_STARTED");
+		for(List<?> batch:List.of(List.of(),Collections.nCopies(21,valid),Arrays.asList(valid,null)))status(telemetry(b,batch),400);
+		for(String field:List.of("eventId","category","code","occurredAt")) {
+			var event=new HashMap<>(valid);event.remove(field);status(telemetry(b,List.of(event)),400);
+		}
+		for(var change:List.of(Map.entry("latencyMs",(Object)(-1)),Map.entry("latencyMs",3600001),Map.entry("latencyMs",0.5),Map.entry("latencyMs","5"),Map.entry("isSuccess","true"),Map.entry("isSuccess",1),Map.entry("occurredAt","invalid"),Map.entry("occurredAt","2026-09-12T00:00:00"),Map.entry("occurredAt","0999-12-31T00:00:00Z"),Map.entry("category","X".repeat(17)),Map.entry("code","X".repeat(49)),Map.entry("networkType","X".repeat(9)))) {
+			var event=new HashMap<>(valid);event.put(change.getKey(),change.getValue());status(telemetry(b,List.of(event)),400);
+		}
+		status(send("POST","/api/v1/telemetry/events",Map.of(),b,null),400);
+		for(Object timestamp:List.of(0,0.5,"2026-09-12T00:00:00+09:00:01","2026-09-12T00:00:00.1234567890Z","2026-02-30T00:00:00Z")) {
+			var event=new HashMap<>(valid);event.put("occurredAt",timestamp);status(telemetry(b,List.of(event)),400);
+		}
+		assertThat(telemetryCount()).isZero();assertThat(telemetryRate()).isZero();
+	}
+	@Test void telemetryRejectsPrivateAndServerOwnedFieldsWithoutReflectingTheirValues()throws Exception {
+		Browser b=guest();
+		for(String field:List.of("sessionId","userId","webVersion","name","phone","latitude","longitude","accuracy","url","token","handle","payload","errorMessage","fingerprint","audio","transcript")) {
+			var event=telemetryEvent("CALL","LIVE_CONNECT_STARTED");event.put(field,"private-synthetic-value");
+			var result=telemetry(b,List.of(event));status(result,400);assertThat(result.body().toString()).doesNotContain("private-synthetic-value");
+		}
+		status(send("POST","/api/v1/telemetry/events",Map.of("events",List.of(telemetryEvent("SOS","SOS_GUIDE_VIEWED")),"userId","private"),b,null),400);
+		assertThat(telemetryCount()).isZero();
+	}
+	@Test void telemetryReplaysWithinBatchAcrossTimezonesAndDeployments()throws Exception {
+		Browser b=guest();var event=telemetryEvent("CALL","PAGE_EXITED");event.put("occurredAt","2026-09-12T00:00:00.123456789Z");
+		eventCounts(telemetry(b,List.of(event,event)),1,1);
+		event.put("callId",null);event.put("isSuccess",null);event.put("latencyMs",null);event.put("networkType",null);
+		event.put("occurredAt","2026-09-12T09:00:00.123456+09:00");doReturn("next-deployment").when(telemetryPolicy).webVersion();
+		eventCounts(telemetry(b,List.of(event)),0,1);assertThat(telemetryRate()).isEqualTo(1);
+		assertThat(jdbc.queryForObject("SELECT `webVersion` FROM `operationEvent` WHERE `category`='CALL'",String.class)).isEqualTo("synthetic-web-v7");
+	}
+	@Test void telemetryConflictsCompareEveryAllowedFieldAndRollbackWholeBatch()throws Exception {
+		Browser b=guest();UUID call=create(b);var event=telemetryEvent("CALL","LIVE_CONNECT_STARTED");eventCounts(telemetry(b,List.of(event)),1,0);
+		for(var change:List.of(Map.entry("callId",(Object)call),Map.entry("code","LIVE_RESUME_STARTED"),Map.entry("isSuccess",true),Map.entry("latencyMs",0),Map.entry("networkType","UNKNOWN"),Map.entry("occurredAt",START.plusSeconds(1).toString()))) {
+			var changed=new HashMap<>(event);changed.put(change.getKey(),change.getValue());
+			code(telemetry(b,List.of(telemetryEvent("SOS","SOS_GUIDE_VIEWED"),changed)),409,"IDEMPOTENCY_CONFLICT");
+		}
+		var changed=new HashMap<>(event);changed.put("category","FALLBACK");changed.put("code","FALLBACK_STARTED");
+		code(telemetry(b,List.of(changed)),409,"IDEMPOTENCY_CONFLICT");
+		var newEvent=telemetryEvent("CALL","PAGE_RELOADED");var conflict=new HashMap<>(newEvent);conflict.put("latencyMs",1);
+		code(telemetry(b,List.of(newEvent,conflict)),409,"IDEMPOTENCY_CONFLICT");
+		assertThat(telemetryCount()).isEqualTo(1);assertThat(telemetryRate()).isEqualTo(1);
+		assertThat(send("GET","/api/v1/calls/"+call,null,b,null).text("state")).isEqualTo("PREPARING");
+	}
+	@Test void telemetryCallOwnershipIsSessionScopedEvenForTheSameMemberAndTerminalCalls()throws Exception {
+		Browser owner=member();complete(owner);UUID call=create(owner);Browser other=member();
+		assertThat(userId(owner)).isEqualTo(userId(other));var event=telemetryEvent("CALL","LIVE_CONNECT_SUCCEEDED");event.put("callId",call);event.put("isSuccess",true);
+		code(telemetry(other,List.of(telemetryEvent("CALL","PAGE_EXITED"),event)),404,"RESOURCE_NOT_FOUND");
+		event.put("callId",UUID.randomUUID());code(telemetry(owner,List.of(event)),404,"RESOURCE_NOT_FOUND");event.put("callId",call);
+		eventCounts(telemetry(owner,List.of(event)),1,0);status(end(owner,call),200);
+		var ended=telemetryEvent("CALL","LIVE_RESUME_SUCCEEDED");ended.put("callId",call);eventCounts(telemetry(owner,List.of(ended)),1,0);
+		assertThat(send("GET","/api/v1/calls/"+call,null,owner,null).text("state")).isEqualTo("ENDED");
+	}
+	@Test void telemetryConcurrentIdenticalAndConflictingRequestsAreAtomic()throws Exception {
+		Browser b=guest();var event=telemetryEvent("CALL","PAGE_EXITED");
+		try(var executor=Executors.newVirtualThreadPerTaskExecutor()) {
+			var ready=new CountDownLatch(1);
+			var first=executor.submit(()->{ready.await();return telemetry(b,List.of(event));});var second=executor.submit(()->{ready.await();return telemetry(b,List.of(event));});ready.countDown();
+			var a=first.get(10,TimeUnit.SECONDS);var c=second.get(10,TimeUnit.SECONDS);status(a,202);status(c,202);
+			assertThat(a.body().path("acceptedCount").asInt()+c.body().path("acceptedCount").asInt()).isEqualTo(1);
+			var next=telemetryEvent("CALL","PAGE_EXITED");var changed=new HashMap<>(next);changed.put("latencyMs",1);var start=new CountDownLatch(1);
+			var left=executor.submit(()->{start.await();return telemetry(b,List.of(next));});var right=executor.submit(()->{start.await();return telemetry(b,List.of(changed));});start.countDown();
+			assertThat(List.of(left.get(10,TimeUnit.SECONDS).status(),right.get(10,TimeUnit.SECONDS).status())).containsExactlyInAnyOrder(202,409);
+		}
+		assertThat(telemetryCount()).isEqualTo(2);assertThat(telemetryRate()).isEqualTo(2);
+	}
+	@Test void telemetryRateCountsNewEventsOnlyAndResetsAtServerMinute()throws Exception {
+		Browser b=guest();List<Map<String,Object>> last=null;
+		for(int batch=0;batch<6;batch++) {last=new ArrayList<>();for(int i=0;i<20;i++)last.add(telemetryEvent("CALL","PAGE_EXITED"));eventCounts(telemetry(b,last),20,0);}
+		eventCounts(telemetry(b,last),0,20);clock.advance(10);
+		var blocked=telemetry(b,List.of(last.getFirst(),telemetryEvent("CALL","PAGE_EXITED")));code(blocked,429,"RATE_LIMITED");
+		assertThat(blocked.headers().firstValue("Retry-After")).contains("50");assertThat(telemetryCount()).isEqualTo(120);assertThat(telemetryRate()).isEqualTo(120);
+		eventCounts(telemetry(guest(),List.of(last.getFirst())),1,0);
+		clock.advance(50);eventCounts(telemetry(b,List.of(last.getFirst(),telemetryEvent("CALL","PAGE_EXITED"))),1,1);
+	}
+	@Test void telemetryInsertFailureRollsBackPreviousInsertsAndRateCharge()throws Exception {
+		Browser b=guest();
+		jdbc.execute("CREATE TRIGGER telemetry_failure BEFORE INSERT ON `operationEvent` FOR EACH ROW BEGIN IF NEW.`code`='COMPOSER_OPEN_FAILED' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic'; END IF; END");
+		try {code(telemetry(b,List.of(telemetryEvent("CALL","PAGE_EXITED"),telemetryEvent("MESSAGE_COMPOSER","COMPOSER_OPEN_FAILED"))),500,"INTERNAL_SERVER_ERROR");}
+		finally {jdbc.execute("DROP TRIGGER telemetry_failure");}
+		assertThat(telemetryCount()).isZero();assertThat(telemetryRate()).isZero();
+	}
+	@Test void telemetryFollowsHistoryAccountAndSessionDeletion()throws Exception {
+		Browser b=member();complete(b);UUID call=create(b);var event=telemetryEvent("CALL","PAGE_EXITED");event.put("callId",call);
+		eventCounts(telemetry(b,List.of(event,telemetryEvent("SOS","SOS_GUIDE_VIEWED"))),2,0);status(end(b,call),200);
+		status(deletion(b,"USAGE_HISTORY",UUID.randomUUID()),202);clock.advance(60);historyCleanup.run();assertThat(telemetryCount()).isEqualTo(1);
+		eventCounts(telemetry(b,List.of(telemetryEvent("SOS","SOS_GUIDE_VIEWED"))),1,0);
+		login(b,"REAUTH",false);status(deletion(b,"ACCOUNT",UUID.randomUUID()),202);clock.advance(60);accountsCleanup.run();assertThat(telemetryCount()).isZero();assertThat(telemetryRate()).isZero();
+		Browser guest=guest();eventCounts(telemetry(guest,List.of(telemetryEvent("SOS","SOS_GUIDE_VIEWED"))),1,0);
+		status(send("POST","/api/v1/auth/logout",Map.of(),guest,null),204);clock.advance(3600);retention.run();assertThat(telemetryCount()).isZero();assertThat(telemetryRate()).isZero();
+	}
+	@Test void telemetryRetentionUsesRecordedTimeAndOpenApiDocuments202AndSessionProtection()throws Exception {
+		Browser b=member();var event=telemetryEvent("CALL","PAGE_EXITED");event.put("occurredAt","2000-01-01T00:00:00Z");eventCounts(telemetry(b,List.of(event)),1,0);
+		clock.advance(1209599);retention.run();assertThat(telemetryCount()).isEqualTo(1);clock.advance(1);retention.run();assertThat(telemetryCount()).isZero();
+		var operation=send("GET","/v3/api-docs",null,null,null).body().path("paths").path("/api/v1/telemetry/events").path("post");
+		assertThat(operation.path("operationId").asString()).isEqualTo("O01");assertThat(operation.path("responses").has("202")).isTrue();
+		assertThat(operation.path("security").toString()).contains("webSession");
+		assertThat(operation.path("parameters").toString()).contains("X-CSRF-Token","Origin").doesNotContain("Idempotency-Key");
+	}
 
 	@Test void anonymousCookieAndStableCsrfArePrivate()throws Exception{
 		var first=send("GET","/api/v1/auth/session",null,null,null);status(first,200);String cookie=first.headers().firstValue("Set-Cookie").orElseThrow();
