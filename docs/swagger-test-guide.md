@@ -65,6 +65,6 @@ writeApi/readApi는 Response를 반환한다. `status`를 확인한 뒤 JSON 응
 
 ## 확인 순서
 
-세부 시나리오: [인증·온보딩](auth-session-onboarding-swagger-test.md), [사용자·동의](user-profile-consent-contacts-settings-swagger-test.md), [통화](ai-safety-call-swagger-test.md).
+세부 시나리오: [인증·온보딩](auth-session-onboarding-swagger-test.md), [사용자·동의](user-profile-consent-contacts-settings-swagger-test.md), [통화](ai-safety-call-swagger-test.md), [안심 메시지](safety-message-swagger-test.md).
 
 실제 브라우저 결과에는 OS·브라우저 버전, 검수 시각, 시나리오와 성공/실패만 남긴다. cookie/code/state/token/개인정보가 포함된 응답이나 화면은 공유 기록에서 제외한다. 자동 검사와 수동 검사의 경계는 [검증 문서](verification.md)를 참고한다.

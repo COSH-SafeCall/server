@@ -1,6 +1,6 @@
 # SafeCall 서버
 
-Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. `reference`와 `design`의 **v4.2-web-mvp / 2026-09-12** 최종 문서를 기준으로 공통 설계 및 API 1~4장까지 구현한다. A02의 시작/콜백을 별개로 세어 총 28개 HTTP 작업이다. A03 refresh는 제거되었다.
+Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. `reference`와 `design`의 **v4.2-web-mvp / 2026-09-12** 최종 문서를 기준으로 공통 설계 및 API 1~5장까지 구현한다. A02의 시작/콜백을 별개로 세어 총 29개 HTTP 작업이다. A03 refresh는 제거되었다.
 
 ## 변경 내용과 구조
 
@@ -12,6 +12,7 @@ Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. `reference`와 `design`의 **
 | 사용자 | `user/api`, `user/service`, `user/repository` | 프로필 PATCH, 문서 단건 조회, 동의·철회, 연락망·설정 |
 | 홈 | `home` | 열린 통화와 정리 상태를 반영한 기능 자격, 고정 상황·상대 목록 |
 | 통화 | `call` | 페이지 키 소유권, 단기 grant, 상태 전이, heartbeat, 같은 통화 재개 1회 |
+| 메시지 | `message` | 클릭 시 자격·최신 보호자 재검증, 본인 번호 마스킹, SAFETY/TEST 작성 자료 |
 | 공통 | `common` | 엄격한 JSON, 오류 응답, HMAC/AES-GCM, 외부 키, Origin/CORS/CSP |
 | DB | `db/schema-mysql.sql` | 최종 DDL과 동일한 19개 테이블, 189개 컬럼, 171개 제약 |
 
@@ -40,6 +41,7 @@ JPA Entity 대신 JDBC repository와 행 record를 사용한다. UUID는 swap �
 | C03 / C04 | GET `/calls/{callId}/connection`, POST `/calls/{callId}/events` |
 | C05 / C06 | POST `/calls/{callId}/heartbeat`, POST `/calls/{callId}/end` |
 | C07 | POST `/calls/{callId}/connection-renewals` |
+| M01 | GET `/message-composer?mode=SAFETY` (또는 TEST) |
 
 ## 로컬 실행
 
@@ -71,4 +73,6 @@ AI/위치 철회는 관련 데이터와 완료 상태를 원자적으로 정리�
 
 비회원 세션은 만료/폐기 1시간 후 정리 대상이 되며, 회원 세션은 폐기/만료 후 30일, 종료 통화 메타데이터는 종료 후 30일, 운영 이벤트는 14일, 완료 삭제 작업은 완료 후 30일 기준으로 정리한다. 더 이른 계정/세션/동의 삭제는 FK cascade를 따른다.
 
-메시지 작성·이력·삭제 조회·telemetry 등 5~7장 신규 API는 구현 범위 밖이다. 운영 외부 키 저장소는 미구현이므로 `prod` 시작은 계속 차단한다. 실제 카카오/Gemini 연동, 브라우저 음성·재개 및 운영 배포는 자동 테스트 완료와 별개다.
+M01은 작성 버튼 클릭 시 현재 회원 자격·보호자를 한 SQL 스냅샷으로 재검증하며 별도 메시지 행을 저장하지 않는다. SAFETY는 COMPLETE, TEST는 MESSAGE_TEST 또는 COMPLETE 단계에서 사용한다. 작성 자료는 no-store이며 브라우저 메모리에서 최대 5분 또는 세션 만료까지 유지한다. 미검수 지도 설정은 mapTemplate=null이다. 실제 좌표·완성 URL·본문 조립은 브라우저가 담당한다. [메시지 API 검증](docs/safety-message-swagger-test.md)을 참고한다.
+
+이력·삭제 조회·telemetry 등 6~7장 신규 API는 구현 범위 밖이다. 운영 외부 키 저장소는 미구현이므로 `prod` 시작은 계속 차단한다. 실제 카카오/Gemini 연동, 브라우저 음성·재개 및 운영 배포는 자동 테스트 완료와 별개다.

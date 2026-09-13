@@ -1,6 +1,6 @@
 # SafeCall 서버 문서
 
-기준: **v4.2-web-mvp · 2026-09-12**. 공통 설계와 API 1~4장까지의 서버 사용·검증·운영 준비 문서다. 모든 셸 명령은 `server` 디렉터리에서 실행한다. [서버 개요 및 API 목록](../README.md)
+기준: **v4.2-web-mvp**. 공통 설계와 API 1~5장까지의 서버 사용·검증·운영 준비 문서다. 모든 셸 명령은 `server` 디렉터리에서 실행한다. [서버 개요 및 API 목록](../README.md)
 
 ## 목적별 읽는 순서
 
@@ -10,6 +10,7 @@
 | 브라우저 API 확인 | [공통 요청](swagger-test-guide.md) → [인증·온보딩](auth-session-onboarding-swagger-test.md) → [사용자·홈](user-profile-consent-contacts-settings-swagger-test.md) → [통화](ai-safety-call-swagger-test.md) |
 | 코드 변경 검증 | [자동 검증과 결과](verification.md) → [변경 리포트](web-v4-refactor-report.md) |
 | 통화 구현 검토 | [명세·코드 대응](ai-safety-call-reference-review.md) → [통화 가이드](ai-safety-call-swagger-test.md) |
+| 안심 메시지 검토 | [작성 자료·자격 재검증](safety-message-swagger-test.md) |
 | 변경 제출 | [커밋·PR 작성 예시](ai-safety-call-git-messages.md) |
 | 운영 배포 준비 | [배포 조건](aws-deployment-readiness.md) |
 
@@ -17,11 +18,12 @@
 
 | 항목 | 상태 |
 |---|---|
-| 인증·사용자·홈·통화 | 28개 HTTP 작업 구현. A02의 시작과 콜백은 별도 작업으로 집계 |
+| 인증·사용자·홈·통화·메시지 | 29개 HTTP 작업 구현. A02의 시작과 콜백은 별도 작업으로 집계 |
 | DB | 최종 DDL의 19테이블·189컬럼·171제약 적용; 새 DB 설치용 |
 | 자동 검증 | [검증 문서](verification.md)와 [결과 JSON](verification-web-v4.json)에서 실행 시각·수량 확인 |
 | ACCOUNT 삭제 | 로컬 삭제와 LOCAL_DELETED까지 구현; 외부 연결 정리와 R03 조회는 후속 범위 |
-| 5~7장 신규 API | 메시지 작성·이력·삭제 조회·telemetry 후속 범위 |
+| 5장 메시지 | M01 구현. 브라우저 작성 화면·위치 취득·실제 지도 템플릿 검수는 별도 |
+| 6~7장 신규 API | 이력·삭제 조회·telemetry 후속 범위 |
 | 실제 외부 연동·운영 | 카카오/Gemini/브라우저 검수 및 운영 외부 키 저장소 연결 필요 |
 
 ## 문서 관리 기준
