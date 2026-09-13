@@ -29,7 +29,7 @@ class HttpGeminiClientTest {
 			.andExpect(jsonPath("$.bidiGenerateContentSetup.generationConfig.responseModalities[0]").value("AUDIO"))
 			.andExpect(jsonPath("$.bidiGenerateContentSetup.tools").doesNotExist())
 			.andExpect(jsonPath("$.bidiGenerateContentSetup.sessionResumption").isMap())
-			.andExpect(jsonPath("$.fieldMask").value("model,generationConfig,systemInstruction,tools,contextWindowCompression,inputAudioTranscription,outputAudioTranscription"))
+			.andExpect(jsonPath("$.fieldMask").value("model,generationConfig,systemInstruction,sessionResumption,tools,contextWindowCompression,inputAudioTranscription,outputAudioTranscription"))
 			.andRespond(withSuccess("{\"name\":\"auth_tokens/synthetic-token\"}",MediaType.APPLICATION_JSON));
 		assertThat(client.issue(request())).isEqualTo("auth_tokens/synthetic-token"); server.verify();
 	}
