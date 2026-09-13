@@ -31,6 +31,7 @@ public enum ErrorCode {
 	CONNECTION_GRANT_EXPIRED(410, "새 연결을 시작할 수 있는 시간이 지났습니다."),
 	CONNECTION_ISSUE_UNKNOWN(503, "연결 정보 발급 결과를 확인할 수 없습니다. 새 통화를 시작해 주세요."),
 	INVALID_REQUEST(400, "요청 형식이 올바르지 않습니다."),
+	INVALID_CURSOR(400, "이용 기록 조회 위치가 올바르지 않습니다."),
 	VALIDATION_FAILED(400, "입력값이 올바르지 않습니다."),
 	AUTHENTICATION_REQUIRED(401, "인증이 필요합니다."),
 	SESSION_EXPIRED(401, "세션이 만료되었습니다. 다시 로그인해 주세요."),

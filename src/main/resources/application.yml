@@ -58,6 +58,7 @@ app:
       app-id: ${KAKAO_APP_ID:0}
       client-id: ${KAKAO_CLIENT_ID:}
       client-secret: ${KAKAO_CLIENT_SECRET:}
+      admin-key: ${KAKAO_ADMIN_KEY:}
       redirect-uri: ${KAKAO_REDIRECT_URI:http://localhost:8081/api/v1/auth/kakao/callback}
       login-scopes: ${KAKAO_LOGIN_SCOPES:name,gender,birthday,birthyear,phone_number}
   auth:

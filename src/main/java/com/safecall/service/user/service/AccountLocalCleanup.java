@@ -17,7 +17,7 @@ import com.safecall.service.common.crypto.*;
 import com.safecall.service.user.api.UserDtos.DeletionReceipt;
 import com.safecall.service.user.repository.UserRepository;
 
-/** Shared local cleanup for U06 ACCOUNT and abandoned onboarding. External unlink belongs to the chapter 6 worker. */
+/** U06/R02 ACCOUNT와 미완료 가입의 로컬 삭제. 외부 정리는 별도 worker가 커밋 이후 수행한다. */
 @Component
 public class AccountLocalCleanup {
 	private final JdbcTemplate jdbc;
@@ -29,11 +29,14 @@ public class AccountLocalCleanup {
 	private final JsonMapper mapper;
 	private final Clock clock;
 	private final TransactionTemplate transaction;
+	private final com.safecall.service.history.service.LocalDeletionTransactions deletionTransactions;
 
 	public AccountLocalCleanup(JdbcTemplate jdbc,AuthRepository auth,UserRepository users,SecretCrypto crypto,
-		UserKeyStore userKeys,TransientKeys temporaryKeys,JsonMapper mapper,Clock clock,PlatformTransactionManager manager) {
+		UserKeyStore userKeys,TransientKeys temporaryKeys,JsonMapper mapper,Clock clock,PlatformTransactionManager manager,
+		com.safecall.service.history.service.LocalDeletionTransactions deletionTransactions) {
 		this.jdbc=jdbc;this.auth=auth;this.users=users;this.crypto=crypto;this.userKeys=userKeys;
 		this.temporaryKeys=temporaryKeys;this.mapper=mapper;this.clock=clock;this.transaction=new TransactionTemplate(manager);
+		this.deletionTransactions=deletionTransactions;
 	}
 
 	@Scheduled(fixedDelayString="${app.auth.cleanup-delay-ms}",initialDelayString="${app.auth.cleanup-delay-ms}")
@@ -46,8 +49,8 @@ public class AccountLocalCleanup {
 			var jobs=jdbc.queryForList("SELECT `id`,`userId` FROM `deletionJob` WHERE `scope`='ACCOUNT' AND `status`='PENDING' AND `requestedAt`<=? LIMIT 100",
 				time(clock.instant().minusSeconds(60)));
 			for(var job:jobs) {
-				try {transaction.executeWithoutResult(tx -> deleteLocal((byte[])job.get("id"),(byte[])job.get("userId")));}
-				catch(RuntimeException ex) {failure();}
+				if(job.get("userId")!=null)deletionTransactions.execute(uuid((byte[])job.get("id")),uuid((byte[])job.get("userId")),
+					()->deleteLocal((byte[])job.get("id"),(byte[])job.get("userId")));
 			}
 		} catch(RuntimeException ex) {failure();}
 	}
@@ -69,8 +72,9 @@ public class AccountLocalCleanup {
 		if(owner==null)return;
 		UUID userId=uuid(owner);var user=auth.user(userId,true);
 		if(user==null)return;
-		var jobs=jdbc.queryForList("SELECT `status` FROM `deletionJob` WHERE `id`=? FOR UPDATE",jobId);
+		var jobs=jdbc.queryForList("SELECT `status`,`cleanupKeyRef` FROM `deletionJob` WHERE `id`=? FOR UPDATE",jobId);
 		if(jobs.isEmpty() || !jobs.getFirst().get("status").equals("PENDING"))return;
+		if(Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM `apiIdempotency` WHERE `resourceId`=? AND `responseExpiresAt`>?)",Boolean.class,jobId,time(clock.instant()))))return;
 		// External cleanup must remain possible after the personal decryption key is discarded.
 		byte[] subjectCipher=jdbc.queryForObject("SELECT `kakaoSubjectCipher` FROM `appUser` WHERE `id`=?",byte[].class,owner);
 		String subject=new String(crypto.open(userKeys.read(user.keyRef()),userId+":subject",subjectCipher),StandardCharsets.UTF_8);
@@ -90,6 +94,7 @@ public class AccountLocalCleanup {
 		jdbc.update("UPDATE `deletionJob` SET `status`='COMPLETED',`completedAt`=?,`cleanupCipher`=NULL,`cleanupKeyRef`=NULL WHERE `userId`=? AND `scope` IN ('AI_DATA','LOCATION_DATA','USAGE_HISTORY') AND `pendingMarker`=1",time(clock.instant()),owner);
 		jdbc.update("DELETE FROM `appUser` WHERE `id`=?",owner);
 		jdbc.update("UPDATE `deletionJob` SET `status`='LOCAL_DELETED',`cleanupCipher`=?,`cleanupKeyRef`=? WHERE `id`=?",cleanupCipher,cleanupRef,jobId);
+		temporaryKeys.discardAfterCommit((String)jobs.getFirst().get("cleanupKeyRef"));
 		temporaryKeys.discardAfterCommit(user.keyRef());
 		// Do not mark COMPLETED here: Kakao unlink and external cleanup have not completed.
 	}

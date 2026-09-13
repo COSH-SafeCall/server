@@ -41,7 +41,7 @@ public class UserController {
 	}
 	@PostMapping(value="/consents/{code}/withdrawal",consumes="application/json")
 	@Operation(operationId="U06",summary="U06 · 동의 철회 및 데이터 정리 접수",tags="4. 문서·동의",
-		description="PRIVACY_PROCESSING 철회 시 계정 API 접근이 즉시 차단됩니다. 같은 키·본문으로 60초 이내 접수증 재조회가 가능합니다. 로컬 정리 후 LOCAL_DELETED이며 외부 연결 정리와 R03 조회는 6장 후속 구현입니다.")
+		description="PRIVACY_PROCESSING 철회 시 계정 API 접근이 즉시 차단됩니다. 같은 키·본문으로 60초 이내 접수증 재조회가 가능합니다. 로컬 삭제 후 LOCAL_DELETED에서 외부 연결 정리를 수행하며 R03으로 상태를 조회합니다.")
 	public ResponseEntity<DeletionView> withdraw(@Parameter(hidden=true) @CookieValue(value="__Host-safecall-session",required=false) String authorization,
 		@PathVariable String code,@Valid @RequestBody WithdrawRequest body,@RequestHeader("Idempotency-Key") UUID key) {
 		var receipt=service.withdraw(authorization,code,body,key);
