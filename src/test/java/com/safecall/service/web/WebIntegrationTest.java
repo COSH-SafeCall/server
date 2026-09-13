@@ -36,6 +36,8 @@ class WebIntegrationTest {
 	@Autowired AccountLocalCleanup accountsCleanup;@Autowired WebRetention retention;@MockitoSpyBean UserKeyStore userKeys;
 	@MockitoBean KakaoCodeClient kakao;@MockitoBean GeminiClient gemini;
 	@MockitoSpyBean AuthRepository authRepository;
+	@Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
+	@MockitoSpyBean com.safecall.service.message.service.MessagePolicy messagePolicy;
 	private final HttpClient http=HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
 	@DynamicPropertySource static void config(DynamicPropertyRegistry r){
 		String url=System.getenv("AUTH_TEST_DB_URL");
@@ -289,5 +291,202 @@ class WebIntegrationTest {
 	}
 	@Test void anonymousAndForeignCookiesCannotUseCachedCatalog()throws Exception{
 		Browser b=bootstrap();code(send("GET","/api/v1/call-options",null,b,null),401,"AUTHENTICATION_REQUIRED");
+	}
+
+	Result guardian(Browser b, String name, String phone) throws Exception {
+		var result=send("POST","/api/v1/me/emergency-contacts",Map.of("name",name,"relationship","가족","phone",phone),b,UUID.randomUUID());
+		status(result,201); return result;
+	}
+	Browser composerMember() throws Exception {
+		Browser b=member(); complete(b); guardian(b,"보호자","01087654321"); return b;
+	}
+	Result composer(Browser b, String query) throws Exception { return send("GET","/api/v1/message-composer"+query,null,b,null); }
+
+	@Test void composerReturnsOrderedContactsMaskedIdentityAndFiveMinuteMaterials() throws Exception {
+		Browser b=composerMember(); guardian(b,"두번째","01011112222");
+		var result=composer(b,""); status(result,200);
+		assertThat(result.body().properties()).hasSize(10);
+		assertThat(result.text("mode")).isEqualTo("SAFETY");
+		assertThat(result.body().path("recipients")).isEqualTo(send("GET","/api/v1/me/emergency-contacts",null,b,null).body().path("items"));
+		assertThat(result.body().path("recipients").get(0).path("slot").asInt()).isEqualTo(1);
+		assertThat(result.body().path("recipients").get(1).path("slot").asInt()).isEqualTo(2);
+		assertThat(result.body().path("identity").properties()).hasSize(2);
+		assertThat(result.body().path("identity").path("maskedPhone").asString()).isEqualTo("010-xxxx-5678");
+		assertThat(result.text("baseBody")).isEqualTo("홍길동(010-xxxx-5678)의 SafeCall 안심 메시지입니다.");
+		assertThat(result.body().toString()).doesNotContain("01012345678","birthDate","gender","keyRef");
+		assertThat(result.body().path("templateVersion").asInt()).isEqualTo(3);
+		assertThat(result.body().path("mapTemplate").isNull()).isTrue();
+		assertThat(result.body().path("isLocationConsentGranted").asBoolean()).isFalse();
+		assertThat(result.text("notice")).isEqualTo("이 화면에서는 실제 문자가 발송되지 않습니다.");
+		assertThat(result.text("preparedAt")).isEqualTo(START.toString());
+		assertThat(result.text("expiresAt")).isEqualTo(START.plusSeconds(300).toString());
+		assertThat(result.headers().firstValue("Cache-Control")).contains("no-store");
+		assertThat(result.headers().firstValue("ETag")).isEmpty();
+	}
+	@Test void composerRevalidatesEveryReadWithoutCreatingRecordsOrUsingConditionalCache() throws Exception {
+		Browser b=composerMember(); long events=count("operationEvent"), replays=count("apiIdempotency");
+		status(composer(b,""),200); clock.advance(1);
+		var p=profile(send("GET","/api/v1/me/profile",null,b,null).body().path("version").asLong());
+		p.put("name","변경이름"); p.put("phone","01022223333");
+		status(send("PATCH","/api/v1/me/profile",p,b,UUID.randomUUID()),200);
+		var result=composer(b,""); status(result,200);
+		assertThat(result.text("baseBody")).startsWith("변경이름(010-xxxx-3333)");
+		assertThat(result.text("preparedAt")).isEqualTo(START.plusSeconds(1).toString());
+		assertThat(count("operationEvent")).isEqualTo(events);
+		assertThat(count("apiIdempotency")).isEqualTo(replays+1);
+		assertThat(count("callSession")).isZero();
+		var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/api/v1/message-composer"))
+			.header("Cookie","__Host-safecall-session="+b.cookie).header("If-None-Match","*").GET().build();
+		assertThat(http.send(request,HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(200);
+		jdbc.update("DELETE FROM `emergencyContact` WHERE `userId`=?",bin(userId(b)));
+		code(composer(b,""),409,"CONTACT_REQUIRED");
+	}
+	@Test void composerTestModeAllowsOnlyMessageTestAndCompleteSteps() throws Exception {
+		Browser b=member(); guardian(b,"보호자","01087654321");
+		status(send("PATCH","/api/v1/me/profile",profile(1),b,UUID.randomUUID()),200);
+		for (String step:List.of("PROFILE","CONTACTS","PERMISSIONS","SOS_GUIDE")) {
+			code(composer(b,"?mode=TEST"),403,"ONBOARDING_REQUIRED"); advance(b,step);
+		}
+		code(composer(b,""),403,"ONBOARDING_REQUIRED");
+		var result=composer(b,"?mode=TEST"); status(result,200);
+		assertThat(result.text("baseBody")).isEqualTo("[테스트] 홍길동(010-xxxx-5678)의 SafeCall 안심 메시지입니다.");
+		assertThat(result.text("mode")).isEqualTo("TEST");
+		advance(b,"MESSAGE_TEST"); status(composer(b,"?mode=TEST"),200); status(composer(b,"?mode=SAFETY"),200);
+	}
+	@Test void composerRejectsMissingGuestAnonymousExpiredAndLoggedOutSessions() throws Exception {
+		code(composer(null,""),401,"SESSION_EXPIRED");
+		code(composer(bootstrap(),""),403,"LOGIN_REQUIRED"); code(composer(guest(),""),403,"LOGIN_REQUIRED");
+		Browser b=composerMember();
+		jdbc.update("UPDATE `webSession` SET `expiresAt`=? WHERE `id`=?",time(START.plusSeconds(30)),bin(sessionId(b)));
+		assertThat(composer(b,"").text("expiresAt")).isEqualTo(START.plusSeconds(30).toString());
+		clock.advance(30); code(composer(b,""),401,"SESSION_EXPIRED");
+		Browser next=member(); status(send("POST","/api/v1/auth/logout",Map.of(),next,null),204);
+		code(composer(next,""),401,"SESSION_EXPIRED");
+	}
+	@Test void composerRejectsUnconfirmedOrMissingProfileWith409WithoutChangingProfilePatchErrors() throws Exception {
+		Browser b=composerMember();
+		jdbc.update("UPDATE `appUser` SET `profileConfirmedAt`=NULL WHERE `id`=?",bin(userId(b)));
+		code(composer(b,""),409,"PROFILE_REQUIRED");
+		var p=profile(2); p.put("name",""); code(send("PATCH","/api/v1/me/profile",p,b,UUID.randomUUID()),422,"PROFILE_REQUIRED");
+		jdbc.update("UPDATE `appUser` SET `profileConfirmedAt`=?,`nameCipher`=NULL WHERE `id`=?",time(START),bin(userId(b)));
+		code(composer(b,""),409,"PROFILE_REQUIRED");
+	}
+	@Test void composerRequiresCurrentPublishedPrivacyConsent() throws Exception {
+		Browser b=composerMember();
+		jdbc.update("UPDATE `serviceDocument` SET `isCurrent`=0 WHERE `code`='PRIVACY_PROCESSING'");
+		jdbc.update("INSERT INTO `serviceDocument` (`code`,`version`,`title`,`body`,`isConsent`,`isRequired`,`isCurrent`,`publishedAt`) VALUES ('PRIVACY_PROCESSING',2,'synthetic','synthetic',1,1,1,?)",time(START));
+		code(composer(b,""),403,"CONSENT_REQUIRED");
+		jdbc.update("UPDATE `consentEvent` SET `documentVersion`=2 WHERE `userId`=? AND `documentCode`='PRIVACY_PROCESSING'",bin(userId(b)));
+		status(composer(b,""),200);
+		jdbc.update("UPDATE `serviceDocument` SET `publishedAt`=? WHERE `code`='PRIVACY_PROCESSING' AND `version`=2",time(START.plusSeconds(1)));
+		code(composer(b,""),403,"CONSENT_REQUIRED");
+	}
+	@Test void composerLocationConsentIsOptionalAndAiConsentIsIndependentAfterCleanup() throws Exception {
+		Browser b=composerMember();
+		status(send("POST","/api/v1/me/consents",Map.of("decisions",List.of(Map.of("code","LOCATION_PROCESSING","version",1,"action","GRANTED"))),b,UUID.randomUUID()),200);
+		assertThat(composer(b,"").body().path("isLocationConsentGranted").asBoolean()).isTrue();
+		status(send("POST","/api/v1/me/consents/LOCATION_PROCESSING/withdrawal",Map.of(),b,UUID.randomUUID()),202);
+		code(composer(b,""),409,"DATA_CLEANUP_PENDING"); cleanup.run();
+		var withoutLocation=composer(b,""); status(withoutLocation,200); assertThat(withoutLocation.body().path("isLocationConsentGranted").asBoolean()).isFalse();
+		status(send("POST","/api/v1/me/consents/AI_CALL/withdrawal",Map.of(),b,UUID.randomUUID()),202);
+		code(composer(b,""),409,"DATA_CLEANUP_PENDING"); cleanup.run(); status(composer(b,""),200);
+	}
+	@Test void composerRefusesAccountDeletionBeforeDecryptingProfile() throws Exception {
+		Browser b=composerMember(); login(b,"REAUTH",false);
+		status(send("POST","/api/v1/me/consents/PRIVACY_PROCESSING/withdrawal",Map.of(),b,UUID.randomUUID()),202);
+		clearInvocations(userKeys); code(composer(b,""),409,"DATA_CLEANUP_PENDING"); verify(userKeys,never()).read(anyString());
+	}
+	@Test void composerBlocksOpenCallOnlyInCurrentSessionAndAllowsEndedCall() throws Exception {
+		Browser b=composerMember(); Browser other=member();
+		jdbc.update("UPDATE `webSession` SET `onboardingStep`='COMPLETE' WHERE `id`=?",bin(sessionId(other)));
+		UUID call=create(b); code(composer(b,""),409,"CALL_ALREADY_OPEN"); code(composer(b,"?mode=TEST"),409,"CALL_ALREADY_OPEN");
+		status(composer(other,""),200); status(end(b,call),200); status(composer(b,""),200);
+	}
+	@Test void composerRejectsUnknownDuplicateParametersAndNeverEchoesPrivateInputs() throws Exception {
+		Browser b=composerMember();
+		for (String query:List.of("?mode=","?mode=OTHER","?mode=safety","?mode=SAFETY&mode=TEST","?latitude=37.5","?userId=secret")) {
+			var result=composer(b,query); code(result,400,"INVALID_REQUEST");
+			assertThat(result.body().properties()).hasSize(6);
+			assertThat(result.text("path")).isEqualTo("/api/v1/message-composer");
+			assertThat(result.body().toString()).doesNotContain("37.5","secret");
+			assertThat(result.headers().firstValue("Cache-Control")).contains("no-store");
+		}
+		code(send("GET","/api/v1/message-composer",Map.of("latitude",37.5),b,null),400,"INVALID_REQUEST");
+		code(raw("GET","/api/v1/message-composer",null,b,null,"https://evil.test",null,null),403,"ORIGIN_NOT_ALLOWED");
+	}
+	@Test void composerDoesNotExposeLocationOrSmsRoutesAndOpenApiUsesCookieOnly() throws Exception {
+		Browser b=composerMember();
+		for (String path:List.of("/api/v1/message-composer/location-link","/api/v1/send-sms","/api/v1/sms/send"))
+			code(send("POST",path,Map.of(),b,null),404,"RESOURCE_NOT_FOUND");
+		var spec=send("GET","/v3/api-docs",null,null,null).body();
+		var operation=spec.path("paths").path("/api/v1/message-composer").path("get");
+		assertThat(operation.path("operationId").asString()).isEqualTo("M01");
+		assertThat(operation.path("security").toString()).contains("webSession");
+		assertThat(operation.path("parameters").toString()).contains("mode","SAFETY","TEST").doesNotContain("X-CSRF-Token","Idempotency-Key");
+	}
+	@Test void composerReadsCommittedProfileAndRecipientTogetherAfterWaitingForAccountLock() throws Exception {
+		Browser b=composerMember(); UUID user=userId(b);
+		UUID contact=UUID.fromString(send("GET","/api/v1/me/emergency-contacts",null,b,null).body().path("items").get(0).path("id").asString());
+		byte[] key=userKeys.read(authRepository.user(user,false).keyRef());
+		var writerReady=new CountDownLatch(1); var readerReady=new CountDownLatch(1); var commitWriter=new CountDownLatch(1);
+		doAnswer(invocation -> { readerReady.countDown(); return invocation.callRealMethod(); }).when(authRepository).user(user,true);
+		try (var executor=Executors.newFixedThreadPool(2)) {
+			var writer=executor.submit(() -> new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+				jdbc.update("UPDATE `appUser` SET `nameCipher`=?,`version`=`version`+1 WHERE `id`=?",
+					crypto.seal(key,user+":name","최신이름".getBytes(java.nio.charset.StandardCharsets.UTF_8)),bin(user));
+				jdbc.update("UPDATE `emergencyContact` SET `phoneCipher`=?,`phoneHash`=?,`version`=`version`+1 WHERE `id`=?",
+					crypto.seal(key,contact+":phone","01055556666".getBytes(java.nio.charset.StandardCharsets.UTF_8)),crypto.hash("PHONE_MATCH:"+user,"01055556666"),bin(contact));
+				writerReady.countDown();
+				try { if (!commitWriter.await(10,TimeUnit.SECONDS)) throw new IllegalStateException("Test release timed out."); }
+				catch (InterruptedException ex) { Thread.currentThread().interrupt(); throw new IllegalStateException(ex); }
+			}));
+			try {
+				assertThat(writerReady.await(5,TimeUnit.SECONDS)).isTrue();
+				var reader=executor.submit(() -> composer(b,""));
+				assertThat(readerReady.await(5,TimeUnit.SECONDS)).isTrue();
+				assertThatThrownBy(() -> reader.get(150,TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+				commitWriter.countDown(); writer.get(5,TimeUnit.SECONDS);
+				var result=reader.get(5,TimeUnit.SECONDS); status(result,200);
+				assertThat(result.body().path("identity").path("name").asString()).isEqualTo("최신이름");
+				assertThat(result.body().path("recipients").get(0).path("phone").asString()).isEqualTo("01055556666");
+				assertThat(result.body().path("recipients").get(0).path("version").asInt()).isEqualTo(2);
+			} finally { commitWriter.countDown(); }
+		}
+	}
+	@Test void composerKeepsRecipientsWithinAccountAndReflectsContactEdits() throws Exception {
+		Browser b=composerMember();
+		when(kakao.exchange(anyString(),anyString())).thenReturn(new KakaoClient.KakaoIdentity("67890","다른회원","MALE",LocalDate.of(2000,1,1),"01033334444"));
+		Browser other=member(); complete(other); guardian(other,"다른보호자","01099998888");
+		var before=composer(b,""); status(before,200);
+		assertThat(before.body().path("recipients").size()).isEqualTo(1);
+		assertThat(before.body().toString()).doesNotContain("다른보호자","01099998888");
+		var contact=before.body().path("recipients").get(0);
+		var edited=send("PATCH","/api/v1/me/emergency-contacts/"+contact.path("id").asString(),
+			Map.of("name","수정보호자","relationship","친구","phone","01055556666","expectedVersion",contact.path("version").asLong()),b,UUID.randomUUID());
+		status(edited,200);
+		assertThat(composer(b,"").body().path("recipients").get(0)).isEqualTo(edited.body());
+		assertThat(composer(other,"").body().toString()).contains("다른보호자").doesNotContain("수정보호자");
+	}
+	@Test void composerReturnsReviewedMapMetadataWithoutCoordinatesOrReviewEvidence() throws Exception {
+		var template=new com.safecall.service.message.service.MessagePolicy(3,
+			"https://map.naver.com/synthetic?lat={latitude}&lon={longitude}","LAT_LON","map.naver.com","synthetic-browser","test-only").mapTemplate();
+		doReturn(template).when(messagePolicy).mapTemplate();
+		var result=composer(composerMember(),""); status(result,200);
+		var map=result.body().path("mapTemplate"); assertThat(map.properties()).hasSize(5);
+		assertThat(map.path("urlTemplate").asString()).contains("{latitude}","{longitude}");
+		assertThat(map.path("coordinateSystem").asString()).isEqualTo("WGS84");
+		assertThat(map.path("maxAgeSeconds").asInt()).isEqualTo(30);
+		assertThat(map.path("maxAccuracyMeters").asInt()).isEqualTo(100);
+		assertThat(result.body().toString()).doesNotContain("validationRef","test-only","reviewedBrowsers","synthetic-browser");
+		assertThat(result.text("baseBody")).doesNotContain("https://");
+	}
+	@Test void composerDoesNotReturnPrivateMaterialsWhenSessionExpiresDuringKeyRead() throws Exception {
+		Browser b=composerMember(); UUID session=sessionId(b);
+		String ref=authRepository.user(userId(b),false).keyRef();
+		jdbc.update("UPDATE `webSession` SET `expiresAt`=? WHERE `id`=?",time(START.plusSeconds(1)),bin(session));
+		doAnswer(invocation -> { byte[] key=(byte[])invocation.callRealMethod(); clock.advance(1); return key; }).when(userKeys).read(ref);
+		var result=composer(b,""); code(result,401,"SESSION_EXPIRED");
+		assertThat(result.body().toString()).doesNotContain("recipients","홍길동","01087654321");
+		assertThat(authRepository.session(session).status()).isEqualTo("EXPIRED");
 	}
 }
