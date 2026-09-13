@@ -2,7 +2,7 @@
 
 [문서 목록](README.md) · v4.2-web-mvp
 
-[.env.example](../.env.example)은 **32개 항목의 값이 비어 있는 양식**이다. 값을 생성하거나 실행 설정을 자동 적용하지 않는다. 설정 파일과 실행 환경변수를 사용하며, `local`은 로컬 `.env`를 추가로 읽는다. `prod`는 `.env`를 가져오지 않는다.
+[.env.example](../.env.example)은 **값이 비어 있는 환경변수 양식**이다. 값을 생성하거나 실행 설정을 자동 적용하지 않는다. 설정 파일과 실행 환경변수를 사용하며, `local`은 로컬 `.env`를 추가로 읽는다. `prod`는 `.env`를 가져오지 않는다.
 
 ## 설정 순서
 
@@ -62,6 +62,21 @@ origin을 바꾸면 redirect URI도 함께 설정한다. 서버 포트만 바꾸
 모델/API/voice는 발행된 promptRelease/personaPrompt에서 읽는다. 환경변수만 입력하거나 DRAFT 초안을 넣는 것으로 통화가 준비되지는 않는다. 발행 경로는 [명세·코드 대응](ai-safety-call-reference-review.md)을 참고한다.
 
 예를 들어 connection TTL을 30초로 줄이면 new-session TTL도 30초 이하로 맞춰야 한다. 기본 60초를 그대로 두면 시작 시 설정 검증에 실패한다. 통화의 최종 만료는 서버 상한·검수된 모델 상한·웹 세션 잔여 시간의 최솟값이다.
+
+## 안심 메시지 지도 템플릿
+
+검수 전에는 아래 6개 항목을 모두 생략한다. M01은 `mapTemplate: null`과 위치 없는 기본 본문을 정상 반환한다. 정상 출시 전에는 실제 Naver 지도 동작을 검수한 설정을 등록해야 한다.
+
+| 항목 | 용도 |
+|---|---|
+| MESSAGE_MAP_VERSION | 양의 정수인 검수 템플릿 버전. 미설정 기본값은 0 |
+| MESSAGE_MAP_URL_TEMPLATE | `{latitude}`, `{longitude}`를 각각 한 번 포함하는 검수된 HTTPS URL |
+| MESSAGE_MAP_COORDINATE_ORDER | URL의 플레이스홀더 순서와 일치하는 LAT_LON 또는 LON_LAT |
+| MESSAGE_MAP_ALLOWED_HOST | URL과 정확히 일치하는 검수 호스트. naver.com 및 하위 호스트 또는 naver.me |
+| MESSAGE_MAP_REVIEWED_BROWSERS | 검수한 OS·브라우저·버전 기록 |
+| MESSAGE_MAP_VALIDATION_REF | 실제 검수 결과의 참조 경로·식별자 |
+
+일부 항목만 입력하거나 URL·호스트·좌표 순서가 잘못되면 시작을 거부한다. 형식 검증이 실제 지도 동작을 보증하지는 않는다. 임의 URL이나 합성 검수 참조로 위치 기능을 활성화하지 않는다. 응답에는 version/urlTemplate/WGS84/30초/100m만 제공하며 내부 검수 기록은 포함하지 않는다. 위도·경도 및 완성된 지도 URL은 서버에 전달하지 않는다.
 
 ## 시작 문제 확인
 

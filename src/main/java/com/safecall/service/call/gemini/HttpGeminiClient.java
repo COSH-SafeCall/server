@@ -48,7 +48,7 @@ public class HttpGeminiClient implements GeminiClient {
 		setup.put("generationConfig",Map.of("responseModalities",List.of("AUDIO"),"speechConfig",Map.of("voiceConfig",Map.of("prebuiltVoiceConfig",Map.of("voiceName",request.voiceId())))));
 		setup.put("sessionResumption",Map.of());
 		if(request.instruction()!=null)setup.put("systemInstruction",Map.of("parts",List.of(Map.of("text",request.instruction()))));
-		String mask="model,generationConfig,systemInstruction,tools,contextWindowCompression,inputAudioTranscription,outputAudioTranscription";
+		String mask="model,generationConfig,systemInstruction,sessionResumption,tools,contextWindowCompression,inputAudioTranscription,outputAudioTranscription";
 		var body=Map.of("uses",1,"expireTime",request.expiresAt().toString(),"newSessionExpireTime",request.newSessionExpiresAt().toString(),"bidiGenerateContentSetup",setup,"fieldMask",mask);
 		try {
 			return client.post().uri(endpoint).header("x-goog-api-key",apiKey).contentType(MediaType.APPLICATION_JSON)

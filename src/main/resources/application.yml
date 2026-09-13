@@ -39,6 +39,14 @@ server:
     include-stacktrace: never
 
 app:
+  message:
+    map:
+      version: ${MESSAGE_MAP_VERSION:0}
+      url-template: ${MESSAGE_MAP_URL_TEMPLATE:}
+      coordinate-order: ${MESSAGE_MAP_COORDINATE_ORDER:}
+      allowed-host: ${MESSAGE_MAP_ALLOWED_HOST:}
+      reviewed-browsers: ${MESSAGE_MAP_REVIEWED_BROWSERS:}
+      validation-ref: ${MESSAGE_MAP_VALIDATION_REF:}
   web:
     origin: ${WEB_ORIGIN:http://localhost:8081}
   crypto:

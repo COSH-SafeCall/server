@@ -4,7 +4,7 @@
 
 ## 기록된 결과
 
-[검증 결과 JSON](verification-web-v4.json)은 2026-09-12 실행 기록이다. 단위 33개와 MySQL 통합 70개, 합계 **103개**가 성공했으며 실패·오류·생략은 0이다. 실행 JAR 빌드도 성공했다. 이번 문서 정리는 실행 코드를 변경하지 않았으므로 테스트를 다시 실행한 것으로 기록하지 않는다.
+[검증 결과 JSON](verification-web-v4.json)은 M01 구현·재검토 후 2026-09-13 KST 실행 기록이다. 단위 40개와 MySQL 통합 85개, 합계 **125개**가 성공했으며 실패·오류·생략은 0이다. 기존 103개에 지도 설정 단위 테스트 5개, 요청 본문 거절 단위 테스트 2개와 M01 통합 테스트 15개를 추가했다. 실행 JAR 빌드도 성공했다.
 
 JSON의 `latest_suite_timestamp`는 해당 작업에서 가장 늦게 시작한 테스트 suite의 시각(UTC)이다. 전체 테스트의 완료 시각이 아니다. `bootJar` 결과는 JSON 집계 대상이 아니며 별도의 Gradle 실행 결과다.
 
@@ -40,6 +40,7 @@ python scripts/verify_auth.py --mysql-bin "C:/Program Files/MySQL/MySQL Server 8
 |---|---|
 | 인증·보호 | 동의 선행, OAuth state 일회성, 교환 후 재검증, CSRF/Origin, 동일 계정 REAUTH와 시간 경계 |
 | 사용자·홈 | DTO 검증, 소유권·version·멱등 범위, 연락망 제한, 동의별 기능 차단, 카탈로그 |
+| 메시지 M01 | SAFETY/TEST 단계, 최신 수신자·본인 번호 마스킹, 동의·삭제·통화 차단, no-store·만료, 복호화 중 세션 만료·만료 상태 커밋, 본문을 읽기 전 거절, 회원 분리, 계정 잠금 대기 후 일관 읽기, 지도 설정·금지 경로 |
 | 통화 | 동시 생성·재개, 페이지 키, grant 세대, 토큰 폐기, 재개 예산, lease·전체 시간 상한 |
 | 삭제·보존 | 정리와 상태의 원자 커밋, 데이터·키 롤백, 미완료 가입·세션·통화 보존 경계 |
 | 키 수명 | 확정 롤백에만 새 키 폐기, 커밋 결과 불명 시 보존, OAuth 키 읽기 실패 정리 |
@@ -49,4 +50,4 @@ HTML 결과는 실행 후 `build/reports/tests/test/index.html` 및 `build/repor
 
 ## 별도 확인이 필요한 것
 
-카카오/Gemini는 자동 테스트에서 모의 처리한다. 실제 앱의 동의 scope·prompt 동작, 보안 쿠키의 브라우저 수용, 음성 입출력, WSS·GoAway 재개, 프록시 및 운영 키 저장소는 실제 환경 검수가 필요하다. 자세한 시나리오는 [수동 검증](swagger-test-guide.md)과 [배포 조건](aws-deployment-readiness.md)을 따른다.
+카카오/Gemini는 자동 테스트에서 모의 처리한다. 실제 앱의 동의 scope·prompt 동작, 보안 쿠키의 브라우저 수용, 음성 입출력, WSS·GoAway 재개, 프록시 및 운영 키 저장소는 실제 환경 검수가 필요하다. M01 지도 테스트의 URL·검수 참조도 합성값이며 실제 Naver 지도 동작을 보증하지 않는다. 작성 화면·브라우저 위치 취득·1초 표시 목표는 별도 검수한다. 자세한 시나리오는 [수동 검증](swagger-test-guide.md), [메시지 검증](safety-message-swagger-test.md), [배포 조건](aws-deployment-readiness.md)을 따른다.
