@@ -22,6 +22,7 @@
 | SERVER_PORT | 서버 포트 / `8081` |
 | SWAGGER_ENABLED | local Swagger 공개 여부 / `true` |
 | WEB_ORIGIN | 페이지와 API의 정확한 origin / `http://localhost:8081` |
+| WEB_VERSION | O01 서버 배포 버전 / `4.2-web-mvp`. 영숫자로 시작하는 1~40자, 영숫자·`.`·`_`·`+`·`-`만 허용. 개인정보 없는 공개 릴리스 식별자를 사용하며 빈 값은 시작 실패 |
 | CSRF_SECRET / HMAC_SECRET / RESPONSE_ENCRYPTION_SECRET | 서로 다른 난수 32바이트를 Base64로 인코딩한 값. 모두 필수 |
 | CRYPTO_KEY_DIRECTORY | local DB 외부 키 디렉터리 / `.keys` |
 

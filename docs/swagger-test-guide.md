@@ -44,6 +44,7 @@ ETag 재조회는 첫 응답의 ETag를 읽고 `readApi(path, undefined, {'If-No
 - 변경 요청에는 Origin과 `X-CSRF-Token`이 필요하다. 쿠키 없는 로그아웃은 CSRF 예외다.
 - `Idempotency-Key`는 A07, U02/U05/U06/U08/U09/U10/U12, C01/C04/C06/C07에 UUID 형식으로 전송한다. 같은 논리 작업의 재시도에는 같은 키와 본문을 사용한다.
 - C01~C07에는 32바이트 난수의 padding 없는 base64url 페이지 키가 필요하다. 43자 문자열이며 새 페이지에는 새 키를 생성한다.
+- O01은 `Idempotency-Key`와 페이지 키 없이 세션·CSRF로 호출하며, 배치의 각 `eventId`를 재시도에도 유지한다. R02에는 `Idempotency-Key`가 필요하다.
 - 예상하지 않은 JSON 필드, 중복 필드, 누락된 필수 필드, 잘못된 enum을 거절한다. PATCH도 명세에 정한 전체 필드를 전달한다.
 - optimistic version 충돌은 409다. 현재 리소스를 다시 읽어 새 사용자 동작으로 전송한다.
 - 공개 문서 및 통화 선택지 ETag 검사는 각각 U03/H02 가이드를 따른다.
@@ -65,6 +66,6 @@ writeApi/readApi는 Response를 반환한다. `status`를 확인한 뒤 JSON 응
 
 ## 확인 순서
 
-세부 시나리오: [인증·온보딩](auth-session-onboarding-swagger-test.md), [사용자·동의](user-profile-consent-contacts-settings-swagger-test.md), [통화](ai-safety-call-swagger-test.md), [안심 메시지](safety-message-swagger-test.md), [이용 기록·삭제](usage-history-data-deletion-test.md).
+세부 시나리오: [인증·온보딩](auth-session-onboarding-swagger-test.md), [사용자·동의](user-profile-consent-contacts-settings-swagger-test.md), [통화](ai-safety-call-swagger-test.md), [안심 메시지](safety-message-swagger-test.md), [이용 기록·삭제](usage-history-data-deletion-test.md), [운영 관측](telemetry-events-test.md).
 
 실제 브라우저 결과에는 OS·브라우저 버전, 검수 시각, 시나리오와 성공/실패만 남긴다. cookie/code/state/token/개인정보가 포함된 응답이나 화면은 공유 기록에서 제외한다. 자동 검사와 수동 검사의 경계는 [검증 문서](verification.md)를 참고한다.

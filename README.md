@@ -1,6 +1,6 @@
 # SafeCall 서버
 
-Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. `reference`와 `design`의 **v4.2-web-mvp / 2026-09-12** 최종 문서를 기준으로 공통 설계 및 API 1~6장까지 구현한다. A02의 시작/콜백을 별개로 세어 총 32개 HTTP 작업이다. A03 refresh는 제거되었다.
+Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. `reference`와 `design`의 **v4.2-web-mvp / 2026-09-12** 최종 문서를 기준으로 공통 설계 및 API 1~7장까지 구현한다. A02의 시작/콜백을 별개로 세어 총 33개 HTTP 작업이다. A03 refresh는 제거되었다.
 
 ## 변경 내용과 구조
 
@@ -14,6 +14,7 @@ Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. `reference`와 `design`의 **
 | 통화 | `call` | 페이지 키 소유권, 단기 grant, 상태 전이, heartbeat, 같은 통화 재개 1회 |
 | 메시지 | `message` | 클릭 시 자격·최신 보호자 재검증, 본인 번호 마스킹, SAFETY/TEST 작성 자료 |
 | 이용 기록·삭제 | `history` | 회원별 이력 페이지 조회, 삭제 접수·접수증 조회, 로컬 삭제·외부 연결 해제 |
+| 운영 관측 | `telemetry` | 허용 사건 배치 수집, 세션별 중복 제거·분당 120건 제한, 통화 소유권 검증 |
 | 공통 | `common` | 엄격한 JSON, 오류 응답, HMAC/AES-GCM, 외부 키, Origin/CORS/CSP |
 | DB | `db/schema-mysql.sql` | 최종 DDL과 동일한 19개 테이블, 189개 컬럼, 171개 제약 |
 
@@ -46,6 +47,7 @@ JPA Entity 대신 JDBC repository와 행 record를 사용한다. UUID는 swap �
 | R01 | GET `/me/usage-history?limit=20&cursor=...` |
 | R02 | POST `/me/data-deletions` |
 | R03 | GET `/data-deletions/{jobId}` |
+| O01 | POST `/telemetry/events` |
 
 ## 로컬 실행
 
@@ -79,4 +81,6 @@ AI/위치 철회와 이용 기록 삭제는 관련 데이터와 완료 상태를
 
 M01은 작성 버튼 클릭 시 현재 회원 자격·보호자를 한 SQL 스냅샷으로 재검증하며 별도 메시지 행을 저장하지 않는다. SAFETY는 COMPLETE, TEST는 MESSAGE_TEST 또는 COMPLETE 단계에서 사용한다. 작성 자료는 no-store이며 브라우저 메모리에서 최대 5분 또는 세션 만료까지 유지한다. 미검수 지도 설정은 mapTemplate=null이다. 실제 좌표·완성 URL·본문 조립은 브라우저가 담당한다. [메시지 API 검증](docs/safety-message-swagger-test.md)을 참고한다.
 
-7장 telemetry API는 구현 범위 밖이다. 운영 외부 키 저장소는 미구현이므로 `prod` 시작은 계속 차단한다. 실제 카카오/Gemini 연동, 브라우저 음성·재개 및 운영 배포는 자동 테스트 완료와 별개다. ACCOUNT 외부 연결 해제에는 서버 전용 KAKAO_ADMIN_KEY 설정이 필요하다.
+O01은 게스트·회원 세션에서 개인정보 없는 허용 사건을 1~20건씩 받는다. 동일 eventId 재전송은 중복 제외하며 신규 사건만 서버 분당 120건 제한에 포함한다. 잘못된 배치는 저장·한도 차감을 모두 취소한다. 배포 버전은 서버의 WEB_VERSION에서만 읽으며 관측으로 통화 상태를 바꾸지 않는다. [7장 검증 가이드](docs/telemetry-events-test.md)를 참고한다.
+
+운영 외부 키 저장소는 미구현이므로 `prod` 시작은 계속 차단한다. 실제 카카오/Gemini 연동, 브라우저 음성·재개 및 운영 배포는 자동 테스트 완료와 별개다. ACCOUNT 외부 연결 해제에는 서버 전용 KAKAO_ADMIN_KEY 설정이 필요하다.
