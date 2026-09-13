@@ -38,6 +38,9 @@ class WebIntegrationTest {
 	@MockitoSpyBean AuthRepository authRepository;
 	@Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
 	@MockitoSpyBean com.safecall.service.message.service.MessagePolicy messagePolicy;
+	@Autowired com.safecall.service.history.service.UsageHistoryCleanup historyCleanup;
+	@Autowired com.safecall.service.history.service.AccountExternalCleanup externalCleanup;
+	@MockitoBean KakaoUnlinkClient unlink;
 	private final HttpClient http=HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
 	@DynamicPropertySource static void config(DynamicPropertyRegistry r){
 		String url=System.getenv("AUTH_TEST_DB_URL");
@@ -480,6 +483,217 @@ class WebIntegrationTest {
 		assertThat(result.body().toString()).doesNotContain("validationRef","test-only","reviewedBrowsers","synthetic-browser");
 		assertThat(result.text("baseBody")).doesNotContain("https://");
 	}
+	Result history(Browser b,String query)throws Exception{return send("GET","/api/v1/me/usage-history"+query,null,b,null);}
+	Browser returningMember()throws Exception{Browser b=member();for(String step:List.of("PROFILE","PERMISSIONS","SOS_GUIDE","MESSAGE_TEST"))advance(b,step);return b;}
+	Result deletion(Browser b,String scope,UUID key)throws Exception{return send("POST","/api/v1/me/data-deletions",Map.of("scope",scope,"isConfirmed",true),b,key);}
+	String receipt(Result r){String value=r.headers().firstValue("Set-Cookie").orElseThrow();return value.substring(value.indexOf('=')+1,value.indexOf(';'));}
+	Result deletionStatus(String id,Browser b,String receipt)throws Exception{
+		var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/api/v1/data-deletions/"+id)).header("Origin",ORIGIN);
+		List<String> cookies=new ArrayList<>();if(b!=null&&b.cookie!=null)cookies.add("__Host-safecall-session="+b.cookie);if(receipt!=null)cookies.add("__Host-safecall-deletion="+receipt);
+		if(!cookies.isEmpty())request.header("Cookie",String.join("; ",cookies));
+		var response=http.send(request.GET().build(),HttpResponse.BodyHandlers.ofString());
+		return new Result(response.statusCode(),mapper.readTree(response.body()),response.headers());
+	}
+	@Test void usageHistoryUsesStableKeysetAcrossMemberSessionsWithMinimalFields()throws Exception{
+		Browser b=member();complete(b);Browser second=returningMember();
+		List<String> ids=new ArrayList<>();for(int i=0;i<5;i++){Browser owner=i%2==0?b:second;UUID id=create(owner);status(end(owner,id),200);ids.add(id.toString());}
+		ids.sort(Comparator.reverseOrder());
+		var first=history(b,"?limit=2");status(first,200);assertThat(first.body().properties()).hasSize(2);
+		assertThat(first.body().path("items").size()).isEqualTo(2);assertThat(first.body().path("items").get(0).properties()).hasSize(10);
+		assertThat(first.body().path("items").get(0).path("id").asString()).isEqualTo(ids.getFirst());
+		assertThat(first.text("nextCursor")).matches("[A-Za-z0-9_-]{16,512}");
+		var next=history(second,"?limit=2&cursor="+first.text("nextCursor"));status(next,200);
+		var last=history(b,"?limit=2&cursor="+next.text("nextCursor"));status(last,200);
+		List<String> actual=new ArrayList<>();for(var page:List.of(first,next,last))for(var item:page.body().path("items"))actual.add(item.path("id").asString());
+		assertThat(actual).containsExactlyElementsOf(ids);assertThat(last.body().path("nextCursor").isNull()).isTrue();
+		assertThat(first.headers().firstValue("Cache-Control")).contains("no-store");assertThat(first.headers().firstValue("ETag")).isEmpty();
+		assertThat(first.body().toString()).doesNotContain("pageKey","leaseExpiresAt","token","홍길동","01012345678");
+	}
+	@Test void usageHistoryExcludesOpenGuestAndOtherAccountCallsButIncludesFailures()throws Exception{
+		Browser b=member();complete(b);UUID ended=create(b);status(end(b,ended),200);UUID failed=create(b);status(end(b,failed),200);
+		jdbc.update("UPDATE `callSession` SET `state`='FAILED',`endReason`='CONNECTION_FAILED' WHERE `id`=?",bin(failed));create(b);
+		Browser g=guest();UUID guestCall=create(g);status(end(g,guestCall),200);
+		when(kakao.exchange(anyString(),anyString())).thenReturn(new KakaoClient.KakaoIdentity("99999","다른회원",null,null,"01022223333"));
+		Browser other=member();complete(other);UUID otherCall=create(other);status(end(other,otherCall),200);
+		var result=history(b,"");status(result,200);assertThat(result.body().path("items").size()).isEqualTo(2);
+		assertThat(result.body().toString()).contains("ENDED","FAILED").doesNotContain(guestCall.toString(),otherCall.toString());
+		code(history(g,""),403,"LOGIN_REQUIRED");code(history(null,""),401,"SESSION_EXPIRED");
+	}
+	@Test void usageHistoryRejectsInvalidLimitCursorAndCrossAccountCursor()throws Exception{
+		Browser b=member();complete(b);for(int i=0;i<2;i++){UUID id=create(b);status(end(b,id),200);}
+		String cursor=history(b,"?limit=1").text("nextCursor");
+		for(String query:List.of("?limit=0","?limit=101","?limit=-1","?limit=1.5","?limit=","?limit=2&limit=3","?userId=private"))status(history(b,query),400);
+		for(String query:List.of("?cursor=","?cursor=private","?cursor="+cursor+"=","?cursor="+cursor+"&cursor="+cursor))code(history(b,query),400,"INVALID_CURSOR");
+		String tampered=(cursor.startsWith("A")?"B":"A")+cursor.substring(1);code(history(b,"?cursor="+tampered),400,"INVALID_CURSOR");
+		when(kakao.exchange(anyString(),anyString())).thenReturn(new KakaoClient.KakaoIdentity("99999",null,null,null,null));
+		code(history(member(),"?cursor="+cursor),400,"INVALID_CURSOR");
+	}
+	@Test void usageHistorySurvivesDeletedCursorAnchorAndAcceptsMaxLimit()throws Exception{
+		Browser b=member();complete(b);UUID first=create(b);status(end(b,first),200);clock.advance(1);UUID second=create(b);status(end(b,second),200);
+		var page=history(b,"?limit=1");jdbc.update("DELETE FROM `callSession` WHERE `id`=?",bin(second));
+		var next=history(b,"?cursor="+page.text("nextCursor"));status(next,200);assertThat(next.body().path("items").get(0).path("id").asString()).isEqualTo(first.toString());
+		status(history(b,"?limit=100"),200);
+	}
+	@Test void usageHistoryDefaultPageHasTwentyItemsAndNoConditionalCache()throws Exception{
+		Browser b=member();complete(b);UUID seed=create(b);status(end(b,seed),200);
+		for(int i=0;i<20;i++)jdbc.update("""
+			INSERT INTO `callSession` (`id`,`sessionId`,`pageKeyHash`,`clientCallId`,`startMode`,`releaseId`,`scenarioCode`,`counterpartCode`,
+			`state`,`endReason`,`isDemographicApplied`,`isGenderAddressApplied`,`createdAt`,`endedAt`,`lastHeartbeatAt`,`leaseExpiresAt`,`expiresAt`)
+			SELECT ?,`sessionId`,`pageKeyHash`,?,`startMode`,`releaseId`,`scenarioCode`,`counterpartCode`,`state`,`endReason`,
+			`isDemographicApplied`,`isGenderAddressApplied`,`createdAt`,`endedAt`,`lastHeartbeatAt`,`leaseExpiresAt`,`expiresAt` FROM `callSession` WHERE `id`=?
+			""",bin(UUID.randomUUID()),bin(UUID.randomUUID()),bin(seed));
+		var first=history(b,"");status(first,200);assertThat(first.body().path("items").size()).isEqualTo(20);
+		var second=history(b,"?cursor="+first.text("nextCursor"));status(second,200);assertThat(second.body().path("items").size()).isEqualTo(1);
+		var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/api/v1/me/usage-history")).header("Cookie","__Host-safecall-session="+b.cookie).header("If-None-Match","*").GET().build();
+		assertThat(http.send(request,HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(200);
+	}
+	@Test void concurrentDeletionRequestsShareJobAndReceipt()throws Exception{
+		Browser b=member();
+		try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+			var first=executor.submit(()->deletion(b,"USAGE_HISTORY",UUID.randomUUID()));var second=executor.submit(()->deletion(b,"USAGE_HISTORY",UUID.randomUUID()));
+			var a=first.get(10,TimeUnit.SECONDS);var c=second.get(10,TimeUnit.SECONDS);status(a,202);status(c,202);
+			assertThat(a.text("id")).isEqualTo(c.text("id"));assertThat(receipt(a)).isEqualTo(receipt(c));assertThat(count("deletionJob")).isEqualTo(1);
+		}
+	}
+	@Test void accountRequestReplaySurvivesReauthWindowButNewKeyRequiresReauth()throws Exception{
+		Browser b=member();login(b,"REAUTH",false);clock.advance(250);UUID key=UUID.randomUUID();var first=deletion(b,"ACCOUNT",key);status(first,202);
+		clock.advance(51);var replay=deletion(b,"ACCOUNT",key);status(replay,202);assertThat(receipt(replay)).isEqualTo(receipt(first));
+		code(deletion(b,"ACCOUNT",UUID.randomUUID()),403,"REAUTHENTICATION_REQUIRED");
+	}
+	@Test void deletionRequiresExplicitConfirmationAllowedScopeAndRequestProtection()throws Exception{
+		Browser b=member();
+		for(Object body:List.of(Map.of("scope","AI_DATA","isConfirmed",true),Map.of("scope","LOCATION_DATA","isConfirmed",true),Map.of("scope","ACCOUNT","isConfirmed",false),Map.of("scope","ACCOUNT"),Map.of("scope","ACCOUNT","isConfirmed",true,"userId","private")))
+			status(send("POST","/api/v1/me/data-deletions",body,b,UUID.randomUUID()),400);
+		status(deletion(b,"USAGE_HISTORY",null),400);
+		code(raw("POST","/api/v1/me/data-deletions","{\"scope\":\"USAGE_HISTORY\",\"isConfirmed\":true}",b,UUID.randomUUID(),ORIGIN,"invalid",null),403,"CSRF_INVALID");
+		code(deletion(guest(),"USAGE_HISTORY",UUID.randomUUID()),403,"LOGIN_REQUIRED");assertThat(count("deletionJob")).isZero();
+	}
+	@Test void accountDeletionRequiresRecentReauthAndBlocksUseAndAllOpenMemberCalls()throws Exception{
+		Browser b=member();complete(b);Browser other=returningMember();UUID call=create(other);
+		code(deletion(b,"ACCOUNT",UUID.randomUUID()),403,"REAUTHENTICATION_REQUIRED");login(b,"REAUTH",false);clock.advance(300);
+		code(deletion(b,"ACCOUNT",UUID.randomUUID()),403,"REAUTHENTICATION_REQUIRED");login(b,"REAUTH",false);
+		var result=deletion(b,"ACCOUNT",UUID.randomUUID());status(result,202);assertThat(result.body().properties()).hasSize(7);
+		assertThat(result.text("dueAt")).isEqualTo(clock.instant().plusSeconds(86400).toString());
+		assertThat(result.headers().firstValue("Set-Cookie").orElseThrow()).contains("Secure","HttpOnly","SameSite=Lax","Path=/","Max-Age=2592000").doesNotContain("Domain");
+		assertThat(result.body().toString()).doesNotContain("receiptToken","cleanupCipher","keyRef","accountSubjectHash");
+		assertThat(jdbc.queryForObject("SELECT `endReason` FROM `callSession` WHERE `id`=?",String.class,bin(call))).isEqualTo("DATA_DELETION");
+		code(history(other,""),409,"ACCOUNT_DELETION_PENDING");code(deletion(other,"USAGE_HISTORY",UUID.randomUUID()),409,"ACCOUNT_DELETION_PENDING");
+	}
+	@Test void deletionReplayReissuesSameReceiptAndDuplicateScopeReusesJob()throws Exception{
+		Browser b=member();UUID key=UUID.randomUUID();var first=deletion(b,"USAGE_HISTORY",key);status(first,202);
+		clock.advance(20);var repeat=deletion(b,"USAGE_HISTORY",key);status(repeat,202);assertThat(receipt(repeat)).isEqualTo(receipt(first));
+		var duplicate=deletion(b,"USAGE_HISTORY",UUID.randomUUID());status(duplicate,202);assertThat(duplicate.text("id")).isEqualTo(first.text("id"));assertThat(receipt(duplicate)).isEqualTo(receipt(first));
+		assertThat(count("deletionJob")).isEqualTo(1);code(deletion(b,"ACCOUNT",key),409,"IDEMPOTENCY_CONFLICT");
+		clock.advance(40);code(deletion(b,"USAGE_HISTORY",key),409,"DELETION_RECEIPT_EXPIRED");historyCleanup.run();assertThat(count("deletionJob")).isEqualTo(1);
+		assertThat(deletionStatus(first.text("id"),null,receipt(first)).text("status")).isEqualTo("PENDING");
+		clock.advance(20);historyCleanup.run();assertThat(deletionStatus(first.text("id"),null,receipt(first)).text("status")).isEqualTo("COMPLETED");
+	}
+	@Test void historyDeletionBlocksAnyMemberOpenCallAndPreservesNewerDataAndProfile()throws Exception{
+		Browser b=composerMember();Browser other=returningMember();UUID old=create(b);status(end(b,old),200);UUID open=create(other);
+		code(deletion(b,"USAGE_HISTORY",UUID.randomUUID()),409,"CALL_ALREADY_OPEN");status(end(other,open),200);
+		String ref=authRepository.user(userId(b),false).keyRef();byte[] key=userKeys.read(ref);long consents=count("consentEvent");
+		var result=deletion(b,"USAGE_HISTORY",UUID.randomUUID());status(result,202);historyCleanup.run();assertThat(count("callSession")).isEqualTo(2);
+		clock.advance(1);UUID newer=create(b);status(end(b,newer),200);clock.advance(59);historyCleanup.run();
+		assertThat(count("callSession")).isEqualTo(1);assertThat(history(b,"").body().path("items").get(0).path("id").asString()).isEqualTo(newer.toString());
+		assertThat(userKeys.read(ref)).isEqualTo(key);assertThat(count("emergencyContact")).isEqualTo(1);assertThat(count("consentEvent")).isEqualTo(consents);
+		assertThat(deletionStatus(result.text("id"),b,null).text("status")).isEqualTo("COMPLETED");
+	}
+	@Test void deletionStatusRequiresMatchingReceiptOrOwnerAndHidesOtherJobs()throws Exception{
+		Browser b=member();var first=deletion(b,"USAGE_HISTORY",UUID.randomUUID());status(first,202);
+		when(kakao.exchange(anyString(),anyString())).thenReturn(new KakaoClient.KakaoIdentity("99999",null,null,null,null));Browser other=member();var second=deletion(other,"USAGE_HISTORY",UUID.randomUUID());status(second,202);
+		status(deletionStatus(first.text("id"),b,null),200);status(deletionStatus(first.text("id"),null,receipt(first)),200);
+		status(deletionStatus(first.text("id"),other,null),404);status(deletionStatus(first.text("id"),null,receipt(second)),404);status(deletionStatus(first.text("id"),null,null),404);
+		status(deletionStatus(UUID.randomUUID().toString(),b,receipt(first)),404);
+		clock.advance(2592000);status(deletionStatus(first.text("id"),null,receipt(first)),404);
+	}
+	@Test void ownerCanReadOlderJobsAfterReceiptChangesAndCookieSurvivesAccountDeletion()throws Exception{
+		Browser b=member();var history=deletion(b,"USAGE_HISTORY",UUID.randomUUID());status(history,202);login(b,"REAUTH",false);
+		var account=deletion(b,"ACCOUNT",UUID.randomUUID());status(account,202);status(deletionStatus(history.text("id"),b,receipt(account)),200);
+		clock.advance(60);accountsCleanup.run();assertThat(count("appUser")).isZero();
+		status(deletionStatus(account.text("id"),b,null),404);assertThat(deletionStatus(account.text("id"),b,receipt(account)).text("status")).isEqualTo("LOCAL_DELETED");
+		status(deletionStatus(history.text("id"),null,receipt(account)),404);
+	}
+	@Test void accountReplayAndCrossEndpointDuplicateKeepFullSixtySecondWindow()throws Exception{
+		Browser b=member();login(b,"REAUTH",false);UUID key=UUID.randomUUID();
+		var withdrawal=send("POST","/api/v1/me/consents/PRIVACY_PROCESSING/withdrawal",Map.of(),b,key);status(withdrawal,202);
+		clock.advance(50);var duplicate=deletion(b,"ACCOUNT",UUID.randomUUID());status(duplicate,202);
+		assertThat(duplicate.text("id")).isEqualTo(withdrawal.text("id"));assertThat(receipt(duplicate)).isEqualTo(receipt(withdrawal));
+		clock.advance(10);accountsCleanup.run();assertThat(count("appUser")).isEqualTo(1);
+		clock.advance(50);accountsCleanup.run();assertThat(count("appUser")).isZero();
+	}
+	@Test void historyDeletionRollbackReportsFailedWithoutLosingDataAndAllowsNewRequest()throws Exception{
+		Browser b=member();complete(b);UUID call=create(b);status(end(b,call),200);var job=deletion(b,"USAGE_HISTORY",UUID.randomUUID());status(job,202);clock.advance(60);
+		jdbc.execute("CREATE TRIGGER `synthetic_history_failure` BEFORE UPDATE ON `deletionJob` FOR EACH ROW BEGIN IF NEW.status='COMPLETED' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic failure'; END IF; END");
+		try{historyCleanup.run();assertThat(count("callSession")).isEqualTo(1);var result=deletionStatus(job.text("id"),b,null);assertThat(result.text("status")).isEqualTo("FAILED");assertThat(result.text("errorCode")).isEqualTo("LOCAL_DELETION_FAILED");}
+		finally{jdbc.execute("DROP TRIGGER `synthetic_history_failure`");}
+		var retry=deletion(b,"USAGE_HISTORY",UUID.randomUUID());status(retry,202);assertThat(retry.text("id")).isNotEqualTo(job.text("id"));clock.advance(60);historyCleanup.run();assertThat(count("callSession")).isZero();
+	}
+	@Test void accountRollbackRestoresAccessAndKeyWithoutRestoringEndedCall()throws Exception{
+		Browser b=member();complete(b);UUID user=userId(b);String ref=authRepository.user(user,false).keyRef();byte[] key=userKeys.read(ref);login(b,"REAUTH",false);UUID call=create(b);
+		var job=deletion(b,"ACCOUNT",UUID.randomUUID());status(job,202);clock.advance(60);
+		jdbc.execute("CREATE TRIGGER `synthetic_local_failure` BEFORE UPDATE ON `deletionJob` FOR EACH ROW BEGIN IF NEW.status='LOCAL_DELETED' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic failure'; END IF; END");
+		try{accountsCleanup.run();assertThat(userKeys.read(ref)).isEqualTo(key);assertThat(count("appUser")).isEqualTo(1);assertThat(deletionStatus(job.text("id"),b,null).text("status")).isEqualTo("FAILED");
+			assertThat(authRepository.user(user,false).status()).isEqualTo("ACTIVE");assertThat(jdbc.queryForObject("SELECT `accountSubjectHash` FROM `deletionJob` WHERE `id`=?",byte[].class,bin(UUID.fromString(job.text("id"))))).isNull();
+			assertThat(jdbc.queryForObject("SELECT `endReason` FROM `callSession` WHERE `id`=?",String.class,bin(call))).isEqualTo("DATA_DELETION");status(history(b,""),200);}
+		finally{jdbc.execute("DROP TRIGGER `synthetic_local_failure`");}
+		status(deletion(b,"ACCOUNT",UUID.randomUUID()),202);
+	}
+	@Test void externalCleanupRetriesAfterLocalDeletionAndReleasesSignupBlockOnlyOnCompletion()throws Exception{
+		Browser b=member();login(b,"REAUTH",false);var job=deletion(b,"ACCOUNT",UUID.randomUUID());status(job,202);clock.advance(60);accountsCleanup.run();
+		UUID id=UUID.fromString(job.text("id"));String cleanupRef=jdbc.queryForObject("SELECT `cleanupKeyRef` FROM `deletionJob` WHERE `id`=?",String.class,bin(id));
+		doThrow(new IllegalStateException("synthetic provider details")).doNothing().when(unlink).unlink("12345");
+		externalCleanup.runOne(id);assertThat(deletionStatus(job.text("id"),null,receipt(job)).text("status")).isEqualTo("LOCAL_DELETED");assertThat(count("appUser")).isZero();
+		Browser retry=bootstrap();assertThat(callback(retry,start(retry,"LOGIN",false)).headers().firstValue("Location")).contains("/login?reason=account_cleanup_pending");
+		externalCleanup.runOne(id);verify(unlink,times(1)).unlink("12345");clock.advance(60);externalCleanup.runOne(id);
+		var result=deletionStatus(job.text("id"),null,receipt(job));assertThat(result.text("status")).isEqualTo("COMPLETED");assertThat(result.body().path("errorCode").isNull()).isTrue();
+		var row=jdbc.queryForMap("SELECT * FROM `deletionJob` WHERE `id`=?",bin(id));for(String field:List.of("cleanupCipher","cleanupKeyRef","accountSubjectHash"))assertThat(row.get(field)).isNull();
+		assertThatThrownBy(()->userKeys.read(cleanupRef)).isInstanceOf(RuntimeException.class);member();assertThat(count("appUser")).isEqualTo(1);
+	}
+	@Test void accountRollbackPreservesActiveStatusEvenWhenCompletedSessionsWerePurged()throws Exception{
+		Browser old=member();complete(old);UUID previousSession=sessionId(old);Browser b=member();UUID user=userId(b);
+		jdbc.update("DELETE FROM `webSession` WHERE `id`=?",bin(previousSession));login(b,"REAUTH",false);
+		assertThat(authRepository.session(sessionId(b)).step().name()).isEqualTo("PROFILE");
+		var job=deletion(b,"ACCOUNT",UUID.randomUUID());status(job,202);UUID id=UUID.fromString(job.text("id"));
+		String recoveryRef=jdbc.queryForObject("SELECT `cleanupKeyRef` FROM `deletionJob` WHERE `id`=?",String.class,bin(id));clock.advance(60);
+		jdbc.execute("CREATE TRIGGER `synthetic_state_failure` BEFORE UPDATE ON `deletionJob` FOR EACH ROW BEGIN IF NEW.status='LOCAL_DELETED' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic failure'; END IF; END");
+		try{accountsCleanup.run();assertThat(authRepository.user(user,false).status()).isEqualTo("ACTIVE");assertThat(deletionStatus(job.text("id"),b,null).text("status")).isEqualTo("FAILED");
+			assertThatThrownBy(()->userKeys.read(recoveryRef)).isInstanceOf(RuntimeException.class);}
+		finally{jdbc.execute("DROP TRIGGER `synthetic_state_failure`");}
+	}
+	@Test void externalCleanupClaimsOnceAndDoesNotHoldTransactionDuringProviderCall()throws Exception{
+		Browser b=member();login(b,"REAUTH",false);var job=deletion(b,"ACCOUNT",UUID.randomUUID());clock.advance(60);accountsCleanup.run();UUID id=UUID.fromString(job.text("id"));
+		CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
+		doAnswer(inv->{assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();entered.countDown();assertThat(release.await(10,TimeUnit.SECONDS)).isTrue();return null;}).when(unlink).unlink("12345");
+		try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+			var first=executor.submit(()->externalCleanup.runOne(id));assertThat(entered.await(10,TimeUnit.SECONDS)).isTrue();
+			try{externalCleanup.runOne(id);status(deletionStatus(job.text("id"),null,receipt(job)),200);verify(unlink,times(1)).unlink("12345");}
+			finally{release.countDown();}first.get(10,TimeUnit.SECONDS);
+		}
+		assertThat(deletionStatus(job.text("id"),null,receipt(job)).text("status")).isEqualTo("COMPLETED");
+	}
+	@Test void externalCleanupRetriesPersonalKeyDeletionBeforeCompletingJob()throws Exception{
+		Browser b=member();String ref=authRepository.user(userId(b),false).keyRef();login(b,"REAUTH",false);var job=deletion(b,"ACCOUNT",UUID.randomUUID());status(job,202);
+		doThrow(new IllegalStateException("synthetic key failure")).when(userKeys).discard(ref);clock.advance(60);accountsCleanup.run();
+		UUID id=UUID.fromString(job.text("id"));externalCleanup.runOne(id);verifyNoInteractions(unlink);
+		assertThat(deletionStatus(job.text("id"),null,receipt(job)).text("status")).isEqualTo("LOCAL_DELETED");assertThat(userKeys.read(ref)).hasSize(32);
+		doCallRealMethod().when(userKeys).discard(ref);clock.advance(60);externalCleanup.runOne(id);
+		assertThat(deletionStatus(job.text("id"),null,receipt(job)).text("status")).isEqualTo("COMPLETED");assertThatThrownBy(()->userKeys.read(ref)).isInstanceOf(RuntimeException.class);
+	}
+	@Test void externalCompletionDbFailureKeepsCleanupKeyAndRetriesWithoutReportingFailed()throws Exception{
+		Browser b=member();login(b,"REAUTH",false);var job=deletion(b,"ACCOUNT",UUID.randomUUID());status(job,202);clock.advance(60);accountsCleanup.run();UUID id=UUID.fromString(job.text("id"));
+		String ref=jdbc.queryForObject("SELECT `cleanupKeyRef` FROM `deletionJob` WHERE `id`=?",String.class,bin(id));
+		jdbc.execute("CREATE TRIGGER `synthetic_external_failure` BEFORE UPDATE ON `deletionJob` FOR EACH ROW BEGIN IF NEW.status='COMPLETED' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic failure'; END IF; END");
+		try{externalCleanup.runOne(id);assertThat(deletionStatus(job.text("id"),null,receipt(job)).text("status")).isEqualTo("LOCAL_DELETED");assertThat(userKeys.read(ref)).hasSize(32);}
+		finally{jdbc.execute("DROP TRIGGER `synthetic_external_failure`");}
+		clock.advance(60);externalCleanup.runOne(id);verify(unlink,times(2)).unlink("12345");assertThat(deletionStatus(job.text("id"),null,receipt(job)).text("status")).isEqualTo("COMPLETED");
+	}
+	@Test void chapterSixOpenApiDescribesReceiptAsAlternativeAndGetWithoutCsrf()throws Exception{
+		var spec=send("GET","/v3/api-docs",null,null,null).body();var paths=spec.path("paths");
+		for(String path:List.of("/api/v1/me/usage-history","/api/v1/data-deletions/{jobId}"))assertThat(paths.path(path).path("get").path("parameters").toString()).doesNotContain("X-CSRF-Token");
+		var security=paths.path("/api/v1/data-deletions/{jobId}").path("get").path("security");assertThat(security.size()).isEqualTo(2);assertThat(security.toString()).contains("webSession","deletionReceipt");
+		assertThat(paths.path("/api/v1/me/data-deletions").path("post").path("responses").has("202")).isTrue();
+	}
+
 	@Test void composerDoesNotReturnPrivateMaterialsWhenSessionExpiresDuringKeyRead() throws Exception {
 		Browser b=composerMember(); UUID session=sessionId(b);
 		String ref=authRepository.user(userId(b),false).keyRef();
