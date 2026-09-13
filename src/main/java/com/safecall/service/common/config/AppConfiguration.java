@@ -11,6 +11,7 @@ public class AppConfiguration {
 	@Bean
 	public org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer strictJson() {
 		return builder -> builder.disable(tools.jackson.databind.MapperFeature.ALLOW_COERCION_OF_SCALARS)
+			.disable(tools.jackson.databind.DeserializationFeature.ACCEPT_FLOAT_AS_INT)
 			.enable(tools.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)
 			.enable(tools.jackson.databind.cfg.EnumFeature.FAIL_ON_NUMBERS_FOR_ENUMS);
 	}

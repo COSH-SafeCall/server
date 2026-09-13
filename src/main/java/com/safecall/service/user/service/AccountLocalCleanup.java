@@ -85,6 +85,7 @@ public class AccountLocalCleanup {
 		for(UUID sessionId:users.sessions(userId)) {
 			auth.lockSession(sessionId);
 			removeRate(crypto.hash("CALL_RATE",sessionId.toString()));
+			removeRate(crypto.hash("TELEMETRY_RATE",sessionId.toString()));
 			for(byte[] call:jdbc.queryForList("SELECT `id` FROM `callSession` WHERE `sessionId`=?",byte[].class,bin(sessionId)))
 				removeRate(crypto.hash("RENEW_RATE",uuid(call).toString()));
 		}

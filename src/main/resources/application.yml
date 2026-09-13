@@ -39,6 +39,8 @@ server:
     include-stacktrace: never
 
 app:
+  telemetry:
+    web-version: ${WEB_VERSION:4.2-web-mvp}
   message:
     map:
       version: ${MESSAGE_MAP_VERSION:0}

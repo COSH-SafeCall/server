@@ -59,6 +59,7 @@ public class WebRetention {
 			discardCallKeys(call);removeRate("RENEW_RATE",uuid(call));
 		}
 		removeRate("CALL_RATE",id);
+		removeRate("TELEMETRY_RATE",id);
 		jdbc.update("DELETE FROM `webSession` WHERE `id`=?",bin(id));
 	}
 	private void discardCallKeys(byte[] id) {jdbc.queryForList("SELECT `keyRef` FROM `connectionGrant` WHERE `callId`=? AND `keyRef` IS NOT NULL",String.class,id).forEach(keys::discardAfterCommit);}
