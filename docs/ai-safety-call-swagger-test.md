@@ -23,7 +23,7 @@ callPageKey와 재개 handle은 현재 페이지 메모리에만 둔다. 새로�
 4. 실제 연결 후 C04에 eventId, type=CONNECTED, grantId, occurredAt, expectedVersion을 전송한다. 다음 RINGING_SHOWN → ANSWERED에는 grantId를 넣지 않는다. 각 요청은 최신 version을 사용한다.
 5. ACTIVE 중 GoAway/연결 중단을 C04의 GO_AWAY/CONNECTION_INTERRUPTED로 관측할 수 있다. 재개 handle과 resumable 상태는 브라우저 메모리에만 유지한다.
 6. C07에 previousGrantId, reason(GO_AWAY/CONNECTION_INTERRUPTED), isResumable=true를 보낸다. 202에서 새 grantId/generation을 읽고 C03의 grantId 쿼리로 연결 정보를 받는다. 재개 성공 C04는 RESUMED와 새 grantId를 사용한다.
-7. 통화 전체 재개 예산은 성공/실패를 합쳐 1회다. ACTIVE 상태와 기존 answeredAt/최대 expiresAt를 유지하며 초기 프롬프트를 다시 계산하지 않는다. handle은 서버에 보내지 않는다.
+7. 통화 전체 재개 예산은 성공/실패를 합쳐 1회다. 정상 재개는 ACTIVE 상태와 기존 answeredAt/최대 expiresAt를 유지한다. 서버는 최초 발급 시각으로 나이를 계산하고 현재 허용된 회원 정보로 지침을 재구성하여 최초 설정 HMAC과 비교한다. 모델·API·음성·개인화·안전 지침이 같을 때만 재개 토큰을 발급한다. 프로필이나 release 변경으로 일치하지 않거나 기존 통화에 검증 정보가 없으면 FAILED/RESUMPTION_FAILED로 종료한다. 전체 프롬프트는 저장하지 않는다. handle은 서버에 보내지 않으며 RESUME은 sessionResumption 전체를 fieldMask로 덮어쓰지 않는다. 실제 문맥 유지와 공급자 연동은 별도 검수한다.
 8. 이탈/숨김/종료 시 브라우저에서 소켓·마이크·재생을 즉시 정리하고 C06에 reason과 occurredAt을 보낸다. 서버 응답을 기다리지 않는다. 종료된 통화는 재개할 수 없다.
 
 C04의 `expectedVersion`은 C02 또는 직전 CallView 응답에서 읽는다. C05는 version을 반환하거나 변경하지 않는다. 서버 API만 직접 호출할 때도 heartbeat를 담당할 검증 클라이언트가 필요하며, 이 문서의 요청 함수는 주기 전송·마이크·WSS를 자동 실행하지 않는다. 수동 사건 입력만으로 실제 연결 성공을 기록하지 않는다.

@@ -21,7 +21,7 @@ public class CallRepository {
 	public record Call(UUID sessionId, UUID releaseId, Instant lastHeartbeatAt, byte[] pageKeyHash, CallView view) {
 		public boolean isTerminal() { return Set.of("ENDED","FAILED").contains(view.state()); }
 	}
-	public record Grant(UUID id,int generation,String purpose,String keyRef,String status,byte[] tokenCipher,Instant createdAt,Instant newSessionExpiresAt,Instant expiresAt) {
+	public record Grant(UUID id,int generation,String purpose,String keyRef,String status,byte[] tokenCipher,Instant createdAt,Instant issuingStartedAt,Instant newSessionExpiresAt,Instant expiresAt) {
 		@Override public String toString() { return "Grant[status="+status+"]"; }
 	}
 	public record Prompt(UUID releaseId, String model, String apiVersion, String safety, String demographic,
@@ -49,7 +49,7 @@ public class CallRepository {
 	public Grant grant(UUID id) {return grant(id,null);}
 	public Grant grant(UUID callId,UUID grantId) {
 		return one("SELECT * FROM `connectionGrant` WHERE `callId`=?"+(grantId==null?" ORDER BY `generation` DESC LIMIT 1":" AND `id`=?")+" FOR UPDATE",
-			(r,n)->new Grant(uuid(r,"id"),r.getInt("generation"),r.getString("purpose"),r.getString("keyRef"),r.getString("status"),r.getBytes("tokenCipher"),instant(r,"createdAt"),instant(r,"newSessionExpiresAt"),instant(r,"expiresAt")),
+			(r,n)->new Grant(uuid(r,"id"),r.getInt("generation"),r.getString("purpose"),r.getString("keyRef"),r.getString("status"),r.getBytes("tokenCipher"),instant(r,"createdAt"),instant(r,"issuingStartedAt"),instant(r,"newSessionExpiresAt"),instant(r,"expiresAt")),
 			grantId==null?new Object[]{bin(callId)}:new Object[]{bin(callId),bin(grantId)});
 	}
 	public int resumeCount(UUID id){return jdbc.queryForObject("SELECT COUNT(*) FROM `connectionGrant` WHERE `callId`=? AND `purpose`='RESUME'",Integer.class,bin(id));}
@@ -87,6 +87,14 @@ public class CallRepository {
 	public void flags(UUID id,boolean demographic,boolean gender) {
 		jdbc.update("UPDATE `callSession` SET `isDemographicApplied`=?,`isGenderAddressApplied`=? WHERE `id`=?",demographic,gender,bin(id));
 	}
+	public record PromptAnchor(Instant preparedAt,byte[] instructionHash) {}
+	public void anchor(UUID call,Instant preparedAt,byte[] instructionHash){
+		jdbc.update("UPDATE `callSession` SET `promptPreparedAt`=?,`promptInstructionHash`=? WHERE `id`=?",time(preparedAt),instructionHash,bin(call));
+	}
+	public PromptAnchor anchor(UUID call){
+		return one("SELECT `promptPreparedAt`,`promptInstructionHash` FROM `callSession` WHERE `id`=?",
+			(r,n)->new PromptAnchor(instant(r,"promptPreparedAt"),r.getBytes("promptInstructionHash")),bin(call));
+	}
 	public void event(UUID id,UUID key,byte[] hash,String type,String state,Instant occurred,Instant recorded) {
 		jdbc.update("""
 			INSERT INTO `callEvent` (`id`,`callId`,`sequence`,`eventKey`,`requestHash`,`eventType`,`stateAfter`,`occurredAt`,`recordedAt`)
@@ -115,7 +123,7 @@ public class CallRepository {
 	}
 	public void markUnknown(UUID grant){jdbc.update("UPDATE `connectionGrant` SET `status`='UNKNOWN',`tokenCipher`=NULL,`keyRef`=NULL WHERE `id`=?",bin(grant));}
 	public void heartbeat(UUID id,Instant now,Instant lease) {jdbc.update("UPDATE `callSession` SET `lastHeartbeatAt`=?,`leaseExpiresAt`=? WHERE `id`=?",time(now),time(lease),bin(id));}
-	public boolean claim(UUID grant,Instant now) {return jdbc.update("UPDATE `connectionGrant` SET `status`='ISSUING' WHERE `id`=? AND `status`='PENDING'",bin(grant))==1;}
+	public boolean claim(UUID grant,Instant now) {return jdbc.update("UPDATE `connectionGrant` SET `status`='ISSUING',`issuingStartedAt`=? WHERE `id`=? AND `status`='PENDING'",time(now),bin(grant))==1;}
 	public void ready(UUID grant,byte[] cipher,String keyRef,Instant newExpiry,Instant expiry,Instant now) {
 		jdbc.update("UPDATE `connectionGrant` SET `status`='READY',`tokenCipher`=?,`keyRef`=?,`newSessionExpiresAt`=?,`expiresAt`=?,`issuedAt`=? WHERE `id`=? AND `status`='ISSUING'",cipher,keyRef,time(newExpiry),time(expiry),time(now),bin(grant));
 	}
@@ -130,7 +138,7 @@ public class CallRepository {
 			WHERE c.`activeMarker`=1 AND (c.`expiresAt`<=? OR c.`leaseExpiresAt`<=?
 			OR EXISTS (SELECT 1 FROM `connectionGrant` g WHERE g.`callId`=c.`id` AND
 			((g.`status`='READY' AND g.`newSessionExpiresAt`<=?)
-			OR (g.`status`='ISSUING' AND g.`createdAt`<=?)))) ORDER BY c.`createdAt` LIMIT 100
+			OR (g.`status`='ISSUING' AND (g.`issuingStartedAt` IS NULL OR g.`issuingStartedAt`<=?))))) ORDER BY c.`createdAt` LIMIT 100
 			""",(r,n)->uuid(r,"id"),time(now),time(now),time(now),time(now.minusSeconds(policy.issueTimeoutSeconds())));
 	}
 	public boolean hasConsent(UUID user,String code,Instant now) {

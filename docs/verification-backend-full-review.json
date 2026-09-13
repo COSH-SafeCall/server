@@ -1,0 +1,20 @@
+{
+  "schema_matches_final": true,
+  "schema_sha256": "5238a4d8aec63e05cee363721e758ed54454cc12974e7c66d97cf3ca6c364dd8",
+  "tasks": {
+    "test": {
+      "tests": 51,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "latest_suite_timestamp": "2026-09-13T17:06:20.760Z"
+    },
+    "integrationTest": {
+      "tests": 148,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "latest_suite_timestamp": "2026-09-13T17:06:27.553Z"
+    }
+  }
+}

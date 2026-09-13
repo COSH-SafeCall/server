@@ -16,7 +16,7 @@ Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. `reference`와 `design`의 **
 | 이용 기록·삭제 | `history` | 회원별 이력 페이지 조회, 삭제 접수·접수증 조회, 로컬 삭제·외부 연결 해제 |
 | 운영 관측 | `telemetry` | 허용 사건 배치 수집, 세션별 중복 제거·분당 120건 제한, 통화 소유권 검증 |
 | 공통 | `common` | 엄격한 JSON, 오류 응답, HMAC/AES-GCM, 외부 키, Origin/CORS/CSP |
-| DB | `db/schema-mysql.sql` | 최종 DDL과 동일한 19개 테이블, 189개 컬럼, 171개 제약 |
+| DB | `db/schema-mysql.sql` | 최종 DDL과 동일한 20개 테이블, 196개 컬럼, 174개 제약 |
 
 JPA Entity 대신 JDBC repository와 행 record를 사용한다. UUID는 swap 없는 BINARY(16), 시간은 UTC DATETIME(6), 개인정보는 Cipher/Hash/외부 keyRef로 저장한다. 음성·대화·완성 프롬프트·좌표·메시지·재개 handle은 저장하지 않는다.
 
@@ -61,6 +61,8 @@ JPA Entity 대신 JDBC repository와 행 record를 사용한다. UUID는 swap �
 
 ## 검증
 
+최신 검토 보완 사항과 배포 전 마이그레이션은 [전체 재검토 수정·검증 보고서](docs/backend-full-review-fixes.md)를 참고한다.
+
 ```powershell
 ./gradlew.bat test bootJar
 python scripts/verify_auth.py
@@ -73,7 +75,7 @@ python scripts/report_web_verification.py
 
 세션은 ANONYMOUS 10분, GUEST 24시간, KAKAO 고정 14일이다. 명시적 동일 계정 REAUTH의 민감 작업 허용 시간은 5분이다. 알려진 카카오 인앱 브라우저에서는 REAUTH와 개인정보 처리 동의 철회를 거절한다. 브라우저 지원 여부에 대한 실제 기기 검수는 별도로 필요하다.
 
-통화 상한은 600초/검수된 모델 상한/세션 잔여 시간의 최솟값이다. lease 30초, heartbeat 5초, 재개 최대 1회, 대기 1초를 적용한다. 통화 생성 시 정책을 고정한다. ISSUING 결과 불명은 생성 후 10초 기준으로 정리하며 같은 grant를 외부에 재발급하지 않는다.
+통화 상한은 600초/검수된 모델 상한/세션 잔여 시간의 최솟값이다. lease 30초, heartbeat 5초, 재개 최대 1회, 대기 1초를 적용한다. 통화 생성 시 정책을 고정한다. ISSUING 결과 불명은 실제 발급 시작 후 10초 기준으로 정리하며 같은 grant를 외부에 재발급하지 않는다.
 
 AI/위치 철회와 이용 기록 삭제는 관련 데이터와 완료 상태를 원자적으로 정리한다. ACCOUNT는 접수증 재생 60초 후 로컬 삭제와 LOCAL_DELETED를 같은 트랜잭션으로 커밋한다. 개인 키 폐기·카카오 연결 해제 완료 후 COMPLETED로 전환한다. R03은 소유 회원 또는 접수증 쿠키로 조회한다. 24시간 미완료 계정도 같은 정리 경로를 사용한다. [6장 검증 가이드](docs/usage-history-data-deletion-test.md)를 참고한다.
 

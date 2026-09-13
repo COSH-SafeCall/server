@@ -41,7 +41,7 @@ public class CallWorker {
 			service.finish(id,request,token,null);
 		} catch(RuntimeException exception) {
 			// Never re-issue an ISSUING grant after a DB failure or uncertain external result.
-			// The reaper changes abandoned issuance to UNKNOWN within its creation deadline.
+			// The reaper changes abandoned issuance to UNKNOWN after its issuance timeout.
 			failure();
 		}
 	}

@@ -2,6 +2,8 @@ package com.safecall.service.call.api;
 import java.time.Instant;
 import java.util.*;
 import jakarta.validation.constraints.*;
+import tools.jackson.databind.annotation.JsonDeserialize;
+import com.safecall.service.common.api.DatabaseInstantDeserializer;
 import com.safecall.service.auth.api.AuthDtos.Permission;
 public final class CallDtos {
 	private CallDtos() {}
@@ -12,9 +14,9 @@ public final class CallDtos {
 	public enum RenewalReason { GO_AWAY, CONNECTION_INTERRUPTED }
 	public record CreateCall(@NotNull UUID clientCallId,@NotNull StartMode startMode,@NotBlank @Size(max=24) String scenarioCode,
 		@NotBlank @Size(max=6) String counterpartCode,@NotNull Permission microphonePermission) {}
-	public record CallEvent(@NotNull UUID eventId,@NotNull EventType type,UUID grantId,@NotNull Instant occurredAt,
+	public record CallEvent(@NotNull UUID eventId,@NotNull EventType type,UUID grantId,@NotNull @JsonDeserialize(using=DatabaseInstantDeserializer.class) Instant occurredAt,
 		@NotNull @Positive Long expectedVersion,Failure errorCode) {}
-	public record EndCall(@NotNull EndReason reason,@NotNull Instant occurredAt) {}
+	public record EndCall(@NotNull EndReason reason,@NotNull @JsonDeserialize(using=DatabaseInstantDeserializer.class) Instant occurredAt) {}
 	public record RenewalRequest(@NotNull UUID previousGrantId,@NotNull RenewalReason reason,@NotNull @AssertTrue Boolean isResumable) {}
 	public record GrantView(UUID grantId,int generation,String purpose,String status) {}
 	public record HeartbeatRequest() {}

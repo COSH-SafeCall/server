@@ -238,6 +238,10 @@ CREATE TABLE `personaPrompt` (
 ) ENGINE=InnoDB COMMENT='페르소나 프롬프트: release마다 4×3=12행. 각 조합 유일. release 발행 후 수정 금지';
 
 CREATE TABLE `callSession` (
+	`promptPreparedAt` DATETIME(6) NULL COMMENT '최초 지침 조립의 기준 시각; 재개 시 나이 계산 고정',
+	`promptInstructionHash` VARBINARY(32) NULL COMMENT '통화별 용도 분리 HMAC; 프롬프트 원문 저장 금지',
+	CONSTRAINT `ckCallPromptAnchor` CHECK ((`promptPreparedAt` IS NULL)=(`promptInstructionHash` IS NULL)),
+	CONSTRAINT `ckCallPromptHash` CHECK (`promptInstructionHash` IS NULL OR OCTET_LENGTH(`promptInstructionHash`)=32),
 	`id` BINARY(16) NOT NULL COMMENT '서버가 생성한 UUID 식별자',
 	`sessionId` BINARY(16) NOT NULL COMMENT '소유 웹 세션 식별자',
 	`pageKeyHash` VARBINARY(32) NOT NULL COMMENT '현재 페이지 메모리 전용 소유 키 HMAC; 새로고침 후 재개 차단',
@@ -319,7 +323,8 @@ CREATE TABLE `connectionGrant` (
 	`purpose` VARCHAR(7) NOT NULL COMMENT 'INITIAL 또는 RESUME; 재개 핸들은 저장하지 않음',
 	`keyRef` TEXT COMMENT 'READY 토큰 암호화의 외부 임시 키 참조',
 	`status` VARCHAR(12) NOT NULL COMMENT '처리/활성 상태; 허용값과 연관 조건은 아래 CHECK 참조',
-	`createdAt` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '발급 작업 생성 시각; 중단된 ISSUING 정리 기준',
+	`createdAt` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '발급 작업 대기 시작 시각',
+	`issuingStartedAt` DATETIME(6) COMMENT '실제 발급 시작 시각; ISSUING 제한 시간 기준',
 	`tokenCipher` BLOB  COMMENT '단기 재조회용 암호문; 연결 성공·종료·발급 기한 경과 시 즉시 제거',
 	`newSessionExpiresAt` DATETIME(6)  COMMENT '이 단기 토큰으로 새 Gemini 연결을 시작할 수 있는 기한',
 	`expiresAt` DATETIME(6)  COMMENT '단기 토큰/연결의 공급자 유효 기한',
@@ -471,3 +476,14 @@ COMMIT;
 -- 동의 문서는 최초 발행 버전 고정. CONSENTS는 호환성 예약값으로 서비스 전이 금지.
 -- 삭제 FAILED는 대상 데이터/키 유지 및 전체 롤백인 경우만. LOCAL_DELETED는 외부 정리 진행.
 -- 멱등 operation은 고정 코드, 소유자와 대상은 scopeHash에 포함(API 0.2.1).
+
+-- Select the existing SafeCall database before applying this additive migration.
+-- No key material or provider response is stored here; retain jobs until discard succeeds.
+CREATE TABLE IF NOT EXISTS `keyDiscardJob` (
+	`id` BINARY(16) NOT NULL,
+	`keyRef` TEXT NOT NULL,
+	`createdAt` DATETIME(6) NOT NULL,
+	`nextAttemptAt` DATETIME(6) NOT NULL,
+	PRIMARY KEY (`id`),
+	INDEX `ixKeyDiscardDue` (`nextAttemptAt`,`id`)
+) ENGINE=InnoDB COMMENT='Durable external key discard jobs, independent of deleted owners';

@@ -33,10 +33,13 @@ class WebIntegrationTest {
 	@LocalServerPort int port;
 	@Autowired JdbcTemplate jdbc;@Autowired JsonMapper mapper;@Autowired MutableClock clock;@Autowired SecretCrypto crypto;
 	@Autowired CallWorker worker;@Autowired CallService calls;@Autowired ConsentCleanup cleanup;@Autowired AuthMaintenance maintenance;
+	@Autowired com.safecall.service.call.repository.CallRepository callRepository;
 	@Autowired AccountLocalCleanup accountsCleanup;@Autowired WebRetention retention;@MockitoSpyBean UserKeyStore userKeys;
 	@MockitoBean KakaoCodeClient kakao;@MockitoBean GeminiClient gemini;
 	@MockitoSpyBean AuthRepository authRepository;
 	@Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
+	@Autowired KeyCreationJournal creationJournal;
+	@MockitoSpyBean KeyDiscardQueue discardQueue;@Autowired TransientKeys transientKeys;
 	@MockitoSpyBean com.safecall.service.message.service.MessagePolicy messagePolicy;
 	@Autowired com.safecall.service.history.service.UsageHistoryCleanup historyCleanup;
 	@Autowired com.safecall.service.history.service.AccountExternalCleanup externalCleanup;
@@ -57,6 +60,7 @@ class WebIntegrationTest {
 		r.add("app.gemini.connection-ttl-seconds",()->600);
 		r.add("app.gemini.validated-model",()->"models/synthetic-live");r.add("app.gemini.validation-ref",()->"synthetic-test-only");r.add("app.gemini.model-max-seconds",()->600);
 		r.add("app.auth.requests-per-minute",()->1000);r.add("app.auth.cleanup-delay-ms",()->3600000);r.add("app.call.worker-delay-ms",()->3600000);
+		r.add("app.crypto.discard-delay-ms",()->3600000);
 	}
 	@TestConfiguration static class Config {
 		@Bean @Primary MutableClock testClock(){return new MutableClock();}
@@ -67,7 +71,7 @@ class WebIntegrationTest {
 		@Override public Instant instant(){return value.get();}@Override public ZoneId getZone(){return ZoneOffset.UTC;}@Override public Clock withZone(ZoneId zone){return this;}
 	}
 	@BeforeEach void reset(){
-		for(String table:List.of("deletionJob","webSession","appUser","rateBucket","serviceDocument","personaPrompt","promptRelease"))jdbc.update("DELETE FROM `"+table+"`");
+		for(String table:List.of("keyDiscardJob","deletionJob","webSession","appUser","rateBucket","serviceDocument","personaPrompt","promptRelease"))jdbc.update("DELETE FROM `"+table+"`");
 		clock.value.set(START);
 		when(kakao.exchange(anyString(),anyString())).thenReturn(new KakaoClient.KakaoIdentity("12345","홍길동","MALE",LocalDate.of(2000,1,1),"01012345678"));
 		when(gemini.isConfigured()).thenReturn(true);when(gemini.issue(any())).thenReturn("auth_tokens/synthetic-only");
@@ -120,6 +124,300 @@ class WebIntegrationTest {
 		return new HashMap<>(Map.of("eventId",UUID.randomUUID(),"category",category,"code",code,"occurredAt",clock.instant().toString()));
 	}
 	Result telemetry(Browser b,List<?> events)throws Exception { return send("POST","/api/v1/telemetry/events",Map.of("events",events),b,null); }
+
+	@Test void guestDailyBudgetSurvivesNewSessionAndReplaysDoNotCharge()throws Exception{
+		Browser first=guest();
+		for(int i=0;i<20;i++){UUID id=create(first);status(end(first,id),200);clock.advance(15);}
+		code(send("POST","/api/v1/calls",createBody(),first,UUID.randomUUID()),429,"RATE_LIMITED");
+		Browser next=guest();
+		code(send("POST","/api/v1/calls",createBody(),next,UUID.randomUUID()),429,"RATE_LIMITED");
+		assertThat(count("callSession")).isEqualTo(20);
+		assertThat(jdbc.queryForObject("SELECT usedCount FROM rateBucket WHERE scopeKind='IP' AND operation='CALL_DAY'",Integer.class)).isEqualTo(20);
+		clock.value.set(Instant.parse("2026-09-12T15:00:00Z")); // Next KST day.
+		var body=createBody();UUID key=UUID.randomUUID();
+		var created=send("POST","/api/v1/calls",body,next,key);status(created,202);
+		status(send("POST","/api/v1/calls",body,next,key),202);
+		status(send("POST","/api/v1/calls",body,next,UUID.randomUUID()),202);
+		assertThat(jdbc.queryForObject("SELECT SUM(usedCount) FROM rateBucket WHERE scopeKind='IP' AND operation='CALL_DAY'",Integer.class)).isEqualTo(21);
+	}
+	@Test void concurrentGuestSessionsShareOneRemainingDailySlot()throws Exception{
+		Browser first=guest();
+		for(int i=0;i<19;i++){UUID id=create(first);status(end(first,id),200);clock.advance(15);}
+		var browsers=List.of(guest(),guest(),guest(),guest());
+		var start=new CountDownLatch(1);
+		try(var executor=Executors.newFixedThreadPool(4)){
+			var futures=new ArrayList<Future<Integer>>();
+			for(var b:browsers)futures.add(executor.submit(()->{start.await();return send("POST","/api/v1/calls",createBody(),b,UUID.randomUUID()).status();}));
+			start.countDown();var statuses=new ArrayList<Integer>();
+			for(var f:futures)statuses.add(f.get(15,TimeUnit.SECONDS));
+			assertThat(statuses).containsExactlyInAnyOrder(202,429,429,429);
+		}
+		assertThat(count("callSession")).isEqualTo(20);
+	}
+	@Test void spoofedForwardedHeadersCannotResetGuestDailyBudget()throws Exception{
+		Browser b=guest();for(int i=0;i<20;i++){UUID id=create(b);status(end(b,id),200);clock.advance(15);}
+		Browser next=guest();
+		var req=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/api/v1/calls"))
+			.header("Content-Type","application/json").header("Origin",ORIGIN).header("Cookie","__Host-safecall-session="+next.cookie)
+			.header("X-CSRF-Token",next.csrf).header("X-Call-Page-Key",next.page).header("Idempotency-Key",UUID.randomUUID().toString())
+			.header("X-Forwarded-For","203.0.113.99").header("Forwarded","for=203.0.113.99")
+			.POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(createBody()))).build();
+		assertThat(http.send(req,HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(429);
+	}
+	@Test void failedKeyDiscardRetainsDurableReferenceAndRestartedWorkerRetries()throws Exception{
+		Browser b=guest();UUID id=create(b);worker.runOne(id);var grant=connection(b,id);
+		String ref=jdbc.queryForObject("SELECT keyRef FROM connectionGrant",String.class);
+		doThrow(new IllegalStateException("synthetic failure")).doCallRealMethod().when(userKeys).discard(ref);
+		status(event(b,id,"CONNECTED",grant.text("grantId")),200);
+		assertThat(jdbc.queryForObject("SELECT keyRef FROM connectionGrant",String.class)).isNull();
+		assertThat(count("keyDiscardJob")).isEqualTo(1);
+		assertThat(java.nio.file.Files.exists(java.nio.file.Path.of(System.getenv("AUTH_TEST_KEY_DIRECTORY"),ref))).isTrue();
+		clock.advance(30);new KeyDiscardQueue(jdbc,userKeys,clock,transactionManager,creationJournal).run();
+		assertThat(count("keyDiscardJob")).isZero();
+		assertThat(java.nio.file.Files.exists(java.nio.file.Path.of(System.getenv("AUTH_TEST_KEY_DIRECTORY"),ref))).isFalse();
+		discardQueue.run();verify(userKeys,times(2)).discard(ref);
+	}
+	@Test void durableDiscardSurvivesMissingCallbackAndAlreadyRemovedKey()throws Exception{
+		String ref=userKeys.create(UUID.randomUUID());
+		var tx=new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+		tx.executeWithoutResult(s->{discardQueue.enqueue(ref);discardQueue.enqueue(ref);});
+		// Simulate process exit after DB commit: no afterCommit callback was registered.
+		userKeys.discard(ref);
+		try(var executor=Executors.newFixedThreadPool(2)){
+			var a=executor.submit(()->new KeyDiscardQueue(jdbc,userKeys,clock,transactionManager,creationJournal).run());
+			var b=executor.submit(()->new KeyDiscardQueue(jdbc,userKeys,clock,transactionManager,creationJournal).run());
+			a.get(15,TimeUnit.SECONDS);b.get(15,TimeUnit.SECONDS);
+		}
+		assertThat(count("keyDiscardJob")).isZero();
+	}
+	@Test void rolledBackDiscardIntentNeverDeletesLiveKey(){
+		String ref=userKeys.create(UUID.randomUUID());
+		new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(s->{transientKeys.discardAfterCommit(ref);s.setRollbackOnly();});
+		discardQueue.run();assertThat(count("keyDiscardJob")).isZero();assertThat(userKeys.read(ref)).hasSize(32);
+	}
+	@Test void failedRollbackKeyDiscardAlsoHasDurableRetry(){
+		var captured=new AtomicReference<String>();
+		doThrow(new IllegalStateException("synthetic failure")).doCallRealMethod().when(userKeys).discard(anyString());
+		new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(s->{captured.set(transientKeys.create(UUID.randomUUID()));s.setRollbackOnly();});
+		assertThat(count("keyDiscardJob")).isEqualTo(1);
+		clock.advance(30);discardQueue.run();assertThat(count("keyDiscardJob")).isZero();
+		assertThat(java.nio.file.Files.exists(java.nio.file.Path.of(System.getenv("AUTH_TEST_KEY_DIRECTORY"),captured.get()))).isFalse();
+	}
+
+@Test void failingDiscardBatchDoesNotStarveLaterJobs(){
+		var tx=new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+		doThrow(new IllegalStateException("synthetic permanent failure")).when(userKeys).discard(startsWith("blocked-"));
+		clock.advance(-1);
+		tx.executeWithoutResult(s->{for(int i=0;i<100;i++)discardQueue.enqueue("blocked-"+i);});
+		clock.advance(1);String ref=userKeys.create(UUID.randomUUID());
+		tx.executeWithoutResult(s->discardQueue.enqueue(ref));
+		discardQueue.run();assertThat(count("keyDiscardJob")).isEqualTo(101);
+		// Failed jobs are delayed; the next due batch must reach the later healthy key.
+		discardQueue.run();assertThat(count("keyDiscardJob")).isEqualTo(100);
+		assertThat(java.nio.file.Files.exists(java.nio.file.Path.of(System.getenv("AUTH_TEST_KEY_DIRECTORY"),ref))).isFalse();
+	}
+	@Test void historyDeletionKeepsHomeAndComposerEligibleThroughCompletion()throws Exception{
+		Browser b=composerMember();status(deletion(b,"USAGE_HISTORY",UUID.randomUUID()),202);
+		assertThat(send("GET","/api/v1/home",null,b,null).body().path("isMessageComposeEligible").asBoolean()).isTrue();status(composer(b,"?mode=SAFETY"),200);
+		clock.advance(60);historyCleanup.run();
+		assertThat(send("GET","/api/v1/home",null,b,null).body().path("isMessageComposeEligible").asBoolean()).isTrue();status(composer(b,"?mode=SAFETY"),200);
+	}
+	@Test void homeAndComposerAgreeForEveryDeletionScopeAndStatus()throws Exception{
+		Browser b=composerMember();var job=deletion(b,"USAGE_HISTORY",UUID.randomUUID());status(job,202);
+		for(String scope:List.of("ACCOUNT","AI_DATA","LOCATION_DATA","USAGE_HISTORY")){
+			for(String state:List.of("PENDING","PROCESSING","FAILED","COMPLETED")){
+				jdbc.update("UPDATE deletionJob SET scope=?,status=?,accountSubjectHash=?,completedAt=? WHERE id=?",scope,state,
+					scope.equals("ACCOUNT")&&!state.equals("COMPLETED")?crypto.hash("TEST_SUBJECT","synthetic"):null,
+					state.equals("COMPLETED")?time(clock.instant()):null,bin(UUID.fromString(job.text("id"))));
+				boolean eligible=scope.equals("USAGE_HISTORY")||Set.of("FAILED","COMPLETED").contains(state);
+				var home=send("GET","/api/v1/home",null,b,null);status(home,200);
+				assertThat(home.body().path("isMessageComposeEligible").asBoolean()).as(scope+" "+state).isEqualTo(eligible);
+				status(composer(b,"?mode=SAFETY"),eligible?200:409);
+			}
+		}
+	}
+	@Test void callEventAndEndRejectInvalidTimesWithoutChangingState()throws Exception{
+		Browser b=guest();UUID id=create(b);
+		for(Object invalid:List.of(0,"2026-09-12T00:00:00","2026-02-30T00:00:00Z","+10000-01-01T00:00:00Z","0999-12-31T23:59:59Z","1000-01-01T00:00:00+01:00","9999-12-31T23:59:59-01:00")){
+			var event=new HashMap<>(eventBody(b,id,"FAILED",null));event.put("errorCode","CONNECTION_FAILED");event.put("occurredAt",invalid);
+			status(send("POST","/api/v1/calls/"+id+"/events",event,b,UUID.randomUUID()),400);
+			status(send("POST","/api/v1/calls/"+id+"/end",Map.of("reason","USER_ENDED","occurredAt",invalid),b,UUID.randomUUID()),400);
+		}
+		assertThat(send("GET","/api/v1/calls/"+id,null,b,null).text("state")).isEqualTo("PREPARING");
+		assertThat(count("callEvent")).isEqualTo(2);
+		status(end(b,id),200);
+	}
+	@Test void callTimesNormalizeOffsetsAndMicrosecondsAtStorageBoundary()throws Exception{
+		Browser b=guest();UUID id=create(b);
+		var body=new HashMap<>(eventBody(b,id,"FAILED",null));body.put("errorCode","CONNECTION_FAILED");body.put("occurredAt","1000-01-01T01:00:00+01:00");
+		status(send("POST","/api/v1/calls/"+id+"/events",body,b,UUID.randomUUID()),200);
+		UUID other=create(b);
+		status(send("POST","/api/v1/calls/"+other+"/end",Map.of("reason","USER_ENDED","occurredAt","9999-12-31T23:59:59.999999999Z"),b,UUID.randomUUID()),200);
+		assertThat(jdbc.queryForObject("SELECT occurredAt FROM callEvent WHERE callId=? AND eventType='ENDED'",java.time.LocalDateTime.class,bin(other))).isEqualTo(java.time.LocalDateTime.parse("9999-12-31T23:59:59.999999"));
+	}
+
+	Browser personalizedMember(String gender,String birth)throws Exception{
+		when(kakao.exchange(anyString(),anyString())).thenReturn(new KakaoClient.KakaoIdentity("12345","홍길동",gender,LocalDate.parse(birth),"01012345678"));
+		Browser b=member();var p=send("GET","/api/v1/me/profile",null,b,null);
+		var body=profile(p.body().path("version").asLong());body.put("gender",gender);body.put("birthDate",birth);
+		status(send("PATCH","/api/v1/me/profile",body,b,UUID.randomUUID()),200);
+		for(String step:List.of("PROFILE","CONTACTS","PERMISSIONS","SOS_GUIDE","MESSAGE_TEST"))advance(b,step);
+		return b;
+	}
+	@Test void resumedMemberKeepsExactInitialInstructionAcrossBirthday()throws Exception{
+		clock.value.set(Instant.parse("2026-09-12T14:59:50Z"));
+		Browser b=personalizedMember("MALE","2000-09-13");
+		UUID id=create(b);String grant=active(b,id);
+		clock.advance(15);status(renew(b,id,grant,UUID.randomUUID()),202);worker.runOne(id);
+		var requests=org.mockito.ArgumentCaptor.forClass(GeminiClient.IssueRequest.class);verify(gemini,times(2)).issue(requests.capture());
+		var initial=requests.getAllValues().get(0);var resume=requests.getAllValues().get(1);
+		assertThat(initial.instruction()).contains("아들","25 남성");
+		assertThat(resume.instruction()).isEqualTo(initial.instruction());
+		assertThat(resume.purpose()).isEqualTo("RESUME");
+		assertThat(jdbc.queryForObject("SELECT isDemographicApplied FROM callSession WHERE id=?",Boolean.class,bin(id))).isTrue();
+		status(event(b,id,"RESUMED",connection(b,id).text("grantId")),200);
+	}
+	@Test void changedPersonalizationEndsResumptionBeforeIssuingDifferentPolicy()throws Exception{
+		Browser b=personalizedMember("FEMALE","2000-01-01");UUID id=create(b);String grant=active(b,id);
+		var p=send("GET","/api/v1/me/profile",null,b,null);
+		status(send("PATCH","/api/v1/me/profile",profile(p.body().path("version").asLong()),b,UUID.randomUUID()),200);
+		status(renew(b,id,grant,UUID.randomUUID()),202);worker.runOne(id);
+		var call=send("GET","/api/v1/calls/"+id,null,b,null);
+		assertThat(call.text("state")).isEqualTo("FAILED");assertThat(call.text("endReason")).isEqualTo("RESUMPTION_FAILED");
+		verify(gemini,times(1)).issue(any());
+	}
+	@Test void changedReleaseOrMissingAnchorCannotSilentlyChangeResumePolicy()throws Exception{
+		Browser b=guest();UUID id=create(b);String grant=active(b,id);
+		jdbc.update("UPDATE personaPrompt SET baseInstruction='changed policy'");
+		status(renew(b,id,grant,UUID.randomUUID()),202);worker.runOne(id);
+		assertThat(send("GET","/api/v1/calls/"+id,null,b,null).text("endReason")).isEqualTo("RESUMPTION_FAILED");
+		UUID other=create(b);String otherGrant=active(b,other);
+		jdbc.update("UPDATE callSession SET promptPreparedAt=NULL,promptInstructionHash=NULL WHERE id=?",bin(other));
+		status(renew(b,other,otherGrant,UUID.randomUUID()),202);worker.runOne(other);
+		assertThat(send("GET","/api/v1/calls/"+other,null,b,null).text("endReason")).isEqualTo("RESUMPTION_FAILED");
+		verify(gemini,times(2)).issue(any());
+	}
+	@Test void delayedInitialIssuanceStillReturnsUsableToken()throws Exception{
+		Browser b=guest();UUID id=create(b);clock.advance(11);worker.runOne(id);
+		verify(gemini,times(1)).issue(any());status(connection(b,id),200);
+		assertThat(jdbc.queryForObject("SELECT status FROM connectionGrant WHERE callId=?",String.class,bin(id))).isEqualTo("READY");
+	}
+	@Test void delayedResumeIssuanceStillReturnsUsableToken()throws Exception{
+		Browser b=guest();UUID id=create(b);String initial=active(b,id);
+		status(renew(b,id,initial,UUID.randomUUID()),202);clock.advance(11);worker.runOne(id);
+		verify(gemini,times(2)).issue(any());status(connection(b,id),200);
+		assertThat(jdbc.queryForObject("SELECT status FROM connectionGrant WHERE callId=? AND generation=2",String.class,bin(id))).isEqualTo("READY");
+	}
+	@Test void delayedClaimGetsFullTimeoutAndReaperExpiresAtBoundary()throws Exception{
+		Browser b=guest();UUID id=create(b);clock.advance(11);assertThat(calls.claim(id)).isNotNull();
+		clock.advance(9);assertThat(callRepository.expired(clock.instant())).doesNotContain(id);
+		clock.advance(1);assertThat(callRepository.expired(clock.instant())).contains(id);
+		calls.reap(id);code(connection(b,id),503,"CONNECTION_ISSUE_UNKNOWN");
+		verify(gemini,never()).issue(any());
+	}
+	@Test void legacyIssuingWithoutStartTimeFailsClosed()throws Exception{
+		Browser b=guest();UUID id=create(b);assertThat(calls.claim(id)).isNotNull();
+		jdbc.update("UPDATE connectionGrant SET issuingStartedAt=NULL WHERE callId=?",bin(id));
+		calls.reap(id);code(connection(b,id),503,"CONNECTION_ISSUE_UNKNOWN");
+		verify(gemini,never()).issue(any());
+	}
+	@Test void concurrentKeyCreationSucceedsWithEveryBusinessConnectionOccupied()throws Exception{
+		var config=new com.zaxxer.hikari.HikariConfig();
+		config.setJdbcUrl(System.getenv("AUTH_TEST_DB_URL"));config.setUsername("root");config.setPassword("");
+		config.setMaximumPoolSize(4);config.setMinimumIdle(4);config.setConnectionTimeout(3000);
+		config.setPoolName("concurrent-business-test");
+		try(var pool=new com.zaxxer.hikari.HikariDataSource(config);var executor=Executors.newFixedThreadPool(4)){
+			var journal=new KeyCreationJournal(pool);
+			try{
+				var reviewJdbc=new JdbcTemplate(pool);
+				var manager=new org.springframework.jdbc.datasource.DataSourceTransactionManager(pool);
+				var queue=new KeyDiscardQueue(reviewJdbc,userKeys,clock,manager,journal);
+				var keys=new TransientKeys(userKeys,queue);
+				var tx=new org.springframework.transaction.support.TransactionTemplate(manager);
+				var ready=new CountDownLatch(4);var start=new CountDownLatch(1);
+				var futures=new ArrayList<Future<String>>();
+				try{
+					for(int i=0;i<4;i++)futures.add(executor.submit(()->tx.execute(s->{
+						reviewJdbc.queryForObject("SELECT 1",Integer.class);ready.countDown();
+						try{if(!start.await(5,TimeUnit.SECONDS))throw new IllegalStateException("barrier timeout");}catch(InterruptedException e){Thread.currentThread().interrupt();throw new RuntimeException(e);}
+						return keys.create(UUID.randomUUID());
+					})));
+					assertThat(ready.await(5,TimeUnit.SECONDS)).isTrue();
+				}finally{start.countDown();}
+				for(var future:futures){String ref=future.get(10,TimeUnit.SECONDS);assertThat(userKeys.read(ref)).hasSize(32);userKeys.discard(ref);}
+				assertThat(count("keyDiscardJob")).isZero();
+			}finally{journal.close();}
+		}
+	}
+	@Test void queueInsertFailurePreventsExternalKeyCreation(){
+		jdbc.execute("CREATE TRIGGER review_queue_failure BEFORE INSERT ON keyDiscardJob FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic queue outage'");
+		try{
+			assertThatThrownBy(()->new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(s->transientKeys.create(UUID.randomUUID())))
+				.isInstanceOf(org.springframework.dao.DataAccessException.class);
+		}finally{jdbc.execute("DROP TRIGGER review_queue_failure");}
+		verify(userKeys,never()).create(any());assertThat(count("keyDiscardJob")).isZero();
+	}
+	@Test void rollbackDoesNotNeedAnotherQueueInsertAndFailedDiscardSurvivesRestart(){
+		var ref=new AtomicReference<String>();
+		doThrow(new IllegalStateException("synthetic store outage")).doCallRealMethod().when(userKeys).discard(anyString());
+		new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(s->{
+			ref.set(transientKeys.create(UUID.randomUUID()));
+			doThrow(new org.springframework.dao.DataAccessResourceFailureException("synthetic queue outage")).when(discardQueue).enqueue(anyString());
+			s.setRollbackOnly();
+		});
+		verify(userKeys).discard(ref.get());assertThat(count("keyDiscardJob")).isEqualTo(1);
+		clock.advance(30);new KeyDiscardQueue(jdbc,userKeys,clock,transactionManager,creationJournal).run();
+		assertThat(count("keyDiscardJob")).isZero();
+		assertThat(java.nio.file.Files.exists(java.nio.file.Path.of(System.getenv("AUTH_TEST_KEY_DIRECTORY"),ref.get()))).isFalse();
+	}
+	@Test void creationJournalRecoversWithoutTransactionCallbackAndKeepsCommittedKeys(){
+		UUID allocation=UUID.randomUUID();String ref=userKeys.reference(allocation);
+		new org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult(s->{
+			UUID job=discardQueue.prepareCreation(ref);discardQueue.enlistCreation(job);userKeys.create(allocation);
+			// Model process death: rollback occurs but no TransientKeys callback is registered.
+			s.setRollbackOnly();
+		});
+		assertThat(count("keyDiscardJob")).isEqualTo(1);clock.advance(30);
+		new KeyDiscardQueue(jdbc,userKeys,clock,transactionManager,creationJournal).run();
+		assertThat(java.nio.file.Files.exists(java.nio.file.Path.of(System.getenv("AUTH_TEST_KEY_DIRECTORY"),ref))).isFalse();
+		String retained=new org.springframework.transaction.support.TransactionTemplate(transactionManager).execute(s->transientKeys.create(UUID.randomUUID()));
+		clock.advance(30);discardQueue.run();assertThat(count("keyDiscardJob")).isZero();assertThat(userKeys.read(retained)).hasSize(32);
+	}
+	@Test void cleanupCannotDeleteKeyDuringCreationTransaction()throws Exception{
+		var tx=new org.springframework.transaction.support.TransactionTemplate(transactionManager);var ref=new AtomicReference<String>();
+		var ready=new CountDownLatch(1);var commit=new CountDownLatch(1);
+		try(var executor=Executors.newFixedThreadPool(2)){
+			var owner=executor.submit(()->tx.executeWithoutResult(s->{
+				ref.set(transientKeys.create(UUID.randomUUID()));ready.countDown();
+				try{if(!commit.await(10,TimeUnit.SECONDS))throw new IllegalStateException("timeout");}catch(InterruptedException e){throw new RuntimeException(e);}
+			}));
+			assertThat(ready.await(10,TimeUnit.SECONDS)).isTrue();clock.advance(30);
+			try{executor.submit(discardQueue::run).get(5,TimeUnit.SECONDS);assertThat(userKeys.read(ref.get())).hasSize(32);}
+			finally{commit.countDown();}
+			owner.get(10,TimeUnit.SECONDS);
+		}
+		discardQueue.run();assertThat(userKeys.read(ref.get())).hasSize(32);assertThat(count("keyDiscardJob")).isZero();
+	}
+	long authSuccesses(){return jdbc.queryForObject("SELECT COUNT(*) FROM operationEvent WHERE code='AUTH_SUCCEEDED'",Long.class);}
+	@Test void successfulAuthenticationIsRecordedOncePerNewAuthenticatedSession()throws Exception{
+		Browser anonymous=bootstrap();assertThat(authSuccesses()).isZero();
+		Browser b=member();assertThat(authSuccesses()).isEqualTo(1);
+		complete(b);send("GET","/api/v1/auth/session",null,b,null);assertThat(authSuccesses()).isEqualTo(1);
+		String state=start(b,"REAUTH",false);var result=callback(b,state);status(result,303);cookie(b,result);
+		assertThat(authSuccesses()).isEqualTo(2);callback(b,state);assertThat(authSuccesses()).isEqualTo(2);
+		Browser guest=guest();assertThat(authSuccesses()).isEqualTo(3);
+		status(send("POST","/api/v1/auth/guest",Map.of(),guest,null),200);
+		status(send("GET","/api/v1/auth/session",null,guest,null),200);assertThat(authSuccesses()).isEqualTo(3);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM operationEvent WHERE code='AUTH_SUCCEEDED' AND isSuccess=1",Long.class)).isEqualTo(3);
+	}
+	@Test void authenticationEventFailureRollsBackSessionIssuance()throws Exception{
+		Browser b=bootstrap();
+		doThrow(new org.springframework.dao.DataAccessResourceFailureException("synthetic")).when(authRepository).observe(any(),eq("AUTH"),eq("AUTH_SUCCEEDED"),eq(true),any());
+		status(send("POST","/api/v1/auth/guest",Map.of(),b,null),500);
+		assertThat(authRepository.byCookie(crypto.hash("WEB_SESSION",b.cookie)).status()).isEqualTo("ACTIVE");
+		assertThat(authSuccesses()).isZero();
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM webSession WHERE kind='GUEST'",Long.class)).isZero();
+	}
 	long telemetryCount() { return jdbc.queryForObject("SELECT COUNT(*) FROM `operationEvent` WHERE `category`<>'AUTH'",Long.class); }
 	int telemetryRate() { return jdbc.queryForObject("SELECT COALESCE(SUM(`usedCount`),0) FROM `rateBucket` WHERE `operation`='TELEMETRY'",Integer.class); }
 	void eventCounts(Result result,int accepted,int duplicate) {
@@ -341,7 +639,7 @@ class WebIntegrationTest {
 	@Test void heartbeatUpdatesLeaseWithoutExtendingDurationOrVersion()throws Exception{Browser b=guest();UUID id=create(b);active(b,id);var before=send("GET","/api/v1/calls/"+id,null,b,null);clock.advance(5);var beat=send("POST","/api/v1/calls/"+id+"/heartbeat",Map.of(),b,null);status(beat,200);assertThat(beat.text("leaseExpiresAt")).isEqualTo(START.plusSeconds(35).toString());var after=send("GET","/api/v1/calls/"+id,null,b,null);assertThat(after.text("expiresAt")).isEqualTo(before.text("expiresAt"));assertThat(after.body().path("version")).isEqualTo(before.body().path("version"));}
 	@Test void callEndIsTerminalAndUsesWebReason()throws Exception{Browser b=guest();UUID id=create(b);worker.runOne(id);status(end(b,id),200);var again=end(b,id);status(again,200);assertThat(again.text("endReason")).isEqualTo("TAB_HIDDEN");assertThat(jdbc.queryForObject("SELECT `status` FROM `connectionGrant`",String.class)).isEqualTo("INVALIDATED");}
 	@Test void resumeCreatesOneGenerationKeepsActiveAndRejectsStaleCallbacks()throws Exception{Browser b=guest();UUID id=create(b);String initial=active(b,id);UUID key=UUID.randomUUID();var renewal=renew(b,id,initial,key);status(renewal,202);assertThat(renew(b,id,initial,key).text("grantId")).isEqualTo(renewal.text("grantId"));code(renew(b,id,initial,UUID.randomUUID()),409,"RENEWAL_ALREADY_REQUESTED");worker.runOne(id);var resumed=connection(b,id);status(resumed,200);assertThat(resumed.text("purpose")).isEqualTo("RESUME");code(event(b,id,"CONNECTED",initial),409,"STALE_CONNECTION_GENERATION");status(event(b,id,"RESUMED",resumed.text("grantId")),200);code(renew(b,id,resumed.text("grantId"),UUID.randomUUID()),409,"RESUME_BUDGET_EXHAUSTED");assertThat(count("connectionGrant")).isEqualTo(2);assertThat(send("GET","/api/v1/calls/"+id,null,b,null).text("state")).isEqualTo("ACTIVE");}
-	@Test void resumeDoesNotRecomposeChangedProfileOrAcceptHandle()throws Exception{Browser b=guest();UUID id=create(b);String initial=active(b,id);status(send("POST","/api/v1/calls/"+id+"/connection-renewals",Map.of("previousGrantId",initial,"reason","GO_AWAY","isResumable",true,"handle","secret"),b,UUID.randomUUID()),400);status(renew(b,id,initial,UUID.randomUUID()),202);var request=calls.claim(id);assertThat(request.instruction()).isNull();assertThat(request.purpose()).isEqualTo("RESUME");}
+	@Test void resumeDoesNotRecomposeChangedProfileOrAcceptHandle()throws Exception{Browser b=guest();UUID id=create(b);String initial=active(b,id);status(send("POST","/api/v1/calls/"+id+"/connection-renewals",Map.of("previousGrantId",initial,"reason","GO_AWAY","isResumable",true,"handle","secret"),b,UUID.randomUUID()),400);status(renew(b,id,initial,UUID.randomUUID()),202);var request=calls.claim(id);assertThat(request.instruction()).contains("safety","도구를 호출하지 않는다");assertThat(request.purpose()).isEqualTo("RESUME");}
 	@Test void resumeIssueUnknownClosesAsResumptionFailed()throws Exception{Browser b=guest();UUID id=create(b);String initial=active(b,id);status(renew(b,id,initial,UUID.randomUUID()),202);when(gemini.issue(any())).thenThrow(new GeminiClient.IssueException(true));worker.runOne(id);var r=send("GET","/api/v1/calls/"+id,null,b,null);assertThat(r.text("state")).isEqualTo("FAILED");assertThat(r.text("endReason")).isEqualTo("RESUMPTION_FAILED");code(connection(b,id),503,"CONNECTION_ISSUE_UNKNOWN");}
 	@Test void stalledIssueTimesOutAtTenSecondsAndNeverReissues()throws Exception{Browser b=guest();UUID id=create(b);assertThat(calls.claim(id)).isNotNull();clock.advance(10);worker.runOne(id);code(connection(b,id),503,"CONNECTION_ISSUE_UNKNOWN");verify(gemini,never()).issue(any());}
 	@Test void workerDiscardsLateResponseAfterEnd()throws Exception{Browser b=guest();UUID id=create(b);var request=calls.claim(id);status(end(b,id),200);calls.finish(id,request,"auth_tokens/late",null);assertThat(jdbc.queryForObject("SELECT `tokenCipher` FROM `connectionGrant`",byte[].class)).isNull();assertThat(connection(b,id).status()).isEqualTo(409);}
@@ -440,9 +738,9 @@ class WebIntegrationTest {
 		Browser b=guest();UUID call=create(b);String grant=active(b,call);UUID key=UUID.randomUUID();status(renew(b,call,grant,key),202);end(b,call);code(renew(b,call,grant,key),409,"CALL_TERMINAL");
 	}
 	@Test void finalSchemaHasExpectedTablesColumnsAndConstraints(){
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(19);
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(189);
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(171);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(20);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(196);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(174);
 	}
 	@Test void aiWithdrawalMasksDemographicsBeforeWorkerAndDoesNotBlockLocationConsent()throws Exception{
 		Browser b=member();status(send("POST","/api/v1/me/consents/AI_CALL/withdrawal",Map.of(),b,UUID.randomUUID()),202);
@@ -809,6 +1107,25 @@ class WebIntegrationTest {
 			assertThat(jdbc.queryForObject("SELECT `endReason` FROM `callSession` WHERE `id`=?",String.class,bin(call))).isEqualTo("DATA_DELETION");status(history(b,""),200);}
 		finally{jdbc.execute("DROP TRIGGER `synthetic_local_failure`");}
 		status(deletion(b,"ACCOUNT",UUID.randomUUID()),202);
+	}
+	@Test void auditFirstHundredFailingAccountJobsStarveLaterHealthyJob()throws Exception{
+		Browser b=member();login(b,"REAUTH",false);var job=deletion(b,"ACCOUNT",UUID.randomUUID());status(job,202);
+		clock.advance(60);accountsCleanup.run();UUID target=UUID.fromString(job.text("id"));
+		var row=jdbc.queryForMap("SELECT cleanupKeyRef,cleanupCipher FROM deletionJob WHERE id=?",bin(target));
+		String ref=(String)row.get("cleanupKeyRef");byte[] secret=userKeys.read(ref);
+		var payload=mapper.readTree(crypto.open(secret,"ACCOUNT_CLEANUP:"+target,(byte[])row.get("cleanupCipher")));
+		for(int i=0;i<100;i++){
+			UUID id=UUID.randomUUID();String subject=String.valueOf(90000+i);
+			byte[] cipher=crypto.seal(secret,"ACCOUNT_CLEANUP:"+id,mapper.writeValueAsBytes(Map.of("subject",subject,"userKeyRef",payload.path("userKeyRef").asString())));
+			jdbc.update("INSERT INTO deletionJob (id,scope,status,accountSubjectHash,receiptHash,cleanupCipher,cleanupKeyRef,requestedAt,cutoffAt,dueAt,receiptExpiresAt) VALUES (?,'ACCOUNT','LOCAL_DELETED',?,?,?,?,?,?,?,?)",
+				bin(id),crypto.hash("KAKAO_SUBJECT",subject),crypto.hash("DELETION_RECEIPT",id.toString()),cipher,ref,time(START.minusSeconds(100-i)),time(START),time(START.plusSeconds(86400)),time(START.plusSeconds(2592000)));
+			doThrow(new IllegalStateException("synthetic persistent provider failure")).when(unlink).unlink(subject);
+		}
+		for(int cycle=0;cycle<3;cycle++){externalCleanup.run();clock.advance(61);}
+		verify(unlink,never()).unlink("12345");
+		assertThat(jdbc.queryForObject("SELECT status FROM deletionJob WHERE id=?",String.class,bin(target))).isEqualTo("LOCAL_DELETED");
+		externalCleanup.runOne(target);verify(unlink).unlink("12345");
+		assertThat(jdbc.queryForObject("SELECT status FROM deletionJob WHERE id=?",String.class,bin(target))).isEqualTo("COMPLETED");
 	}
 	@Test void externalCleanupRetriesAfterLocalDeletionAndReleasesSignupBlockOnlyOnCompletion()throws Exception{
 		Browser b=member();login(b,"REAUTH",false);var job=deletion(b,"ACCOUNT",UUID.randomUUID());status(job,202);clock.advance(60);accountsCleanup.run();

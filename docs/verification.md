@@ -4,6 +4,12 @@
 
 ## 기록된 결과
 
+2026-09-14 전체 재검토 수정 후 **단위 51개 + 격리 MySQL 통합 148개 = 199개**가 통과했다. 실패·오류·생략 0이다. 신규 DDL과 기존 DDL에 세 마이그레이션을 적용한 경로 모두 통과했고 `bootJar` 빌드도 성공했다. [최신 결과 JSON](verification-backend-full-review.json), [전체 재검토 수정 보고서](backend-full-review-fixes.md)를 참고한다. 아래는 이전 버전의 기록이다.
+
+2026-09-14 추가 수정 후 **단위 51개 + 격리 MySQL 통합 143개 = 194개**가 통과했다. 실패·오류·생략 0, `bootJar` 성공이다. 신규 DDL 경로에 이어 기존 DDL에 두 마이그레이션을 적용한 경로에서도 전체 회귀가 통과했다. [당시 결과 JSON](verification-backend-additional.json), [추가 수정 보고서](backend-additional-fixes.md)를 참고한다.
+
+2026-09-13 백엔드 최종 검토 보완 후 **단위 51개 + 격리 MySQL 통합 136개 = 187개**가 통과했다. 실패·오류·생략은 0이며 `bootJar`도 성공했다. [당시 결과 JSON](verification-backend-review.json)과 [항목별 수정 보고서](backend-review-fixes.md)를 참고한다. 아래 171개 기록은 보완 전 실행 기록이다.
+
 [검증 결과 JSON](verification-web-v4.json)은 API 7장 구현·재검토 후 2026-09-13 KST 실행 기록이다. 단위 49개와 MySQL 통합 122개, 합계 **171개**가 성공했으며 실패·오류·생략은 0이다. 6장까지의 154개에 배포 버전 검증 단위 테스트 2개와 O01 HTTP·DB 통합 테스트 15개를 추가했다. 같은 코드로 실행 JAR 빌드도 성공했다.
 
 JSON의 `latest_suite_timestamp`는 해당 작업에서 가장 늦게 시작한 테스트 suite의 시각(UTC)이다. 전체 테스트의 완료 시각이 아니다. `bootJar` 결과는 JSON 집계 대상이 아니며 별도의 Gradle 실행 결과다.
