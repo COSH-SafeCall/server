@@ -34,6 +34,7 @@
 | KAKAO_APP_ID | 숫자 앱 ID / `0`은 실제 앱 설정 전 상태 |
 | KAKAO_CLIENT_ID | REST API 키 / 미설정 시 OAuth 시작 불가 |
 | KAKAO_CLIENT_SECRET | 앱에서 활성화한 client secret / 미사용 시 생략 가능 |
+| KAKAO_ADMIN_KEY | ACCOUNT 로컬 삭제 후 연결 해제용 서버 전용 Service app admin key. 미설정 시 LOCAL_DELETED에서 재시도 |
 | KAKAO_REDIRECT_URI | 정확히 `WEB_ORIGIN` + `/api/v1/auth/kakao/callback` |
 | KAKAO_LOGIN_SCOPES | 앱 승인 범위에 맞춘 항목 / `name,gender,birthday,birthyear,phone_number` |
 | AUTH_REQUESTS_PER_MINUTE | 인증 시작 IP별 분당 제한 / `10` |

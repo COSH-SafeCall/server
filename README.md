@@ -1,6 +1,6 @@
 # SafeCall 서버
 
-Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. `reference`와 `design`의 **v4.2-web-mvp / 2026-09-12** 최종 문서를 기준으로 공통 설계 및 API 1~5장까지 구현한다. A02의 시작/콜백을 별개로 세어 총 29개 HTTP 작업이다. A03 refresh는 제거되었다.
+Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. `reference`와 `design`의 **v4.2-web-mvp / 2026-09-12** 최종 문서를 기준으로 공통 설계 및 API 1~6장까지 구현한다. A02의 시작/콜백을 별개로 세어 총 32개 HTTP 작업이다. A03 refresh는 제거되었다.
 
 ## 변경 내용과 구조
 
@@ -13,6 +13,7 @@ Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. `reference`와 `design`의 **
 | 홈 | `home` | 열린 통화와 정리 상태를 반영한 기능 자격, 고정 상황·상대 목록 |
 | 통화 | `call` | 페이지 키 소유권, 단기 grant, 상태 전이, heartbeat, 같은 통화 재개 1회 |
 | 메시지 | `message` | 클릭 시 자격·최신 보호자 재검증, 본인 번호 마스킹, SAFETY/TEST 작성 자료 |
+| 이용 기록·삭제 | `history` | 회원별 이력 페이지 조회, 삭제 접수·접수증 조회, 로컬 삭제·외부 연결 해제 |
 | 공통 | `common` | 엄격한 JSON, 오류 응답, HMAC/AES-GCM, 외부 키, Origin/CORS/CSP |
 | DB | `db/schema-mysql.sql` | 최종 DDL과 동일한 19개 테이블, 189개 컬럼, 171개 제약 |
 
@@ -42,6 +43,9 @@ JPA Entity 대신 JDBC repository와 행 record를 사용한다. UUID는 swap �
 | C05 / C06 | POST `/calls/{callId}/heartbeat`, POST `/calls/{callId}/end` |
 | C07 | POST `/calls/{callId}/connection-renewals` |
 | M01 | GET `/message-composer?mode=SAFETY` (또는 TEST) |
+| R01 | GET `/me/usage-history?limit=20&cursor=...` |
+| R02 | POST `/me/data-deletions` |
+| R03 | GET `/data-deletions/{jobId}` |
 
 ## 로컬 실행
 
@@ -69,10 +73,10 @@ python scripts/report_web_verification.py
 
 통화 상한은 600초/검수된 모델 상한/세션 잔여 시간의 최솟값이다. lease 30초, heartbeat 5초, 재개 최대 1회, 대기 1초를 적용한다. 통화 생성 시 정책을 고정한다. ISSUING 결과 불명은 생성 후 10초 기준으로 정리하며 같은 grant를 외부에 재발급하지 않는다.
 
-AI/위치 철회는 관련 데이터와 완료 상태를 원자적으로 정리한다. ACCOUNT는 접수증 재생 60초 후 로컬 삭제와 LOCAL_DELETED를 같은 트랜잭션으로 커밋한다. 외부 카카오 연결 해제와 삭제 상태 조회 R03 등 6장 API는 후속 범위이므로 ACCOUNT를 COMPLETED로 표시하지 않는다. 24시간 미완료 계정도 같은 정리 경로를 사용한다.
+AI/위치 철회와 이용 기록 삭제는 관련 데이터와 완료 상태를 원자적으로 정리한다. ACCOUNT는 접수증 재생 60초 후 로컬 삭제와 LOCAL_DELETED를 같은 트랜잭션으로 커밋한다. 개인 키 폐기·카카오 연결 해제 완료 후 COMPLETED로 전환한다. R03은 소유 회원 또는 접수증 쿠키로 조회한다. 24시간 미완료 계정도 같은 정리 경로를 사용한다. [6장 검증 가이드](docs/usage-history-data-deletion-test.md)를 참고한다.
 
 비회원 세션은 만료/폐기 1시간 후 정리 대상이 되며, 회원 세션은 폐기/만료 후 30일, 종료 통화 메타데이터는 종료 후 30일, 운영 이벤트는 14일, 완료 삭제 작업은 완료 후 30일 기준으로 정리한다. 더 이른 계정/세션/동의 삭제는 FK cascade를 따른다.
 
 M01은 작성 버튼 클릭 시 현재 회원 자격·보호자를 한 SQL 스냅샷으로 재검증하며 별도 메시지 행을 저장하지 않는다. SAFETY는 COMPLETE, TEST는 MESSAGE_TEST 또는 COMPLETE 단계에서 사용한다. 작성 자료는 no-store이며 브라우저 메모리에서 최대 5분 또는 세션 만료까지 유지한다. 미검수 지도 설정은 mapTemplate=null이다. 실제 좌표·완성 URL·본문 조립은 브라우저가 담당한다. [메시지 API 검증](docs/safety-message-swagger-test.md)을 참고한다.
 
-이력·삭제 조회·telemetry 등 6~7장 신규 API는 구현 범위 밖이다. 운영 외부 키 저장소는 미구현이므로 `prod` 시작은 계속 차단한다. 실제 카카오/Gemini 연동, 브라우저 음성·재개 및 운영 배포는 자동 테스트 완료와 별개다.
+7장 telemetry API는 구현 범위 밖이다. 운영 외부 키 저장소는 미구현이므로 `prod` 시작은 계속 차단한다. 실제 카카오/Gemini 연동, 브라우저 음성·재개 및 운영 배포는 자동 테스트 완료와 별개다. ACCOUNT 외부 연결 해제에는 서버 전용 KAKAO_ADMIN_KEY 설정이 필요하다.
