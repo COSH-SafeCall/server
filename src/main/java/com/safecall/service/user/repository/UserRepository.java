@@ -14,7 +14,11 @@ import com.safecall.service.user.api.UserDtos.*;
 @Repository
 public class UserRepository {
 	private final JdbcTemplate jdbc;
-	public UserRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+	private final com.safecall.service.common.crypto.SecretCrypto crypto;
+	private final com.safecall.service.common.crypto.TransientKeys keys;
+	public UserRepository(JdbcTemplate jdbc,com.safecall.service.common.crypto.SecretCrypto crypto,com.safecall.service.common.crypto.TransientKeys keys) {
+		this.jdbc=jdbc;this.crypto=crypto;this.keys=keys;
+	}
 	public record Contact(UUID id, int slot, byte[] name, byte[] relationship, byte[] phone, byte[] phoneHash, long version) {}
 	public record Document(String code, int version, String title, String body, boolean isConsent, boolean isRequired, Instant publishedAt) {}
 	public record Event(String action, int version, Instant recordedAt) {}
@@ -102,6 +106,13 @@ public class UserRepository {
 			INSERT INTO `deletionJob` (`id`,`userId`,`scope`,`accountSubjectHash`,`receiptHash`,`requestedAt`,`cutoffAt`,`dueAt`,`receiptExpiresAt`)
 			SELECT ?,?, ?,CASE WHEN ?='ACCOUNT' THEN `kakaoSubjectHash` ELSE NULL END,?,?,?,?,? FROM `appUser` WHERE `id`=?
 			""",bin(receipt.id()),bin(user),receipt.scope(),receipt.scope(),receiptHash,time(now),time(now),time(receipt.dueAt()),time(receipt.receiptExpiresAt()),bin(user));
-		if (receipt.scope().equals("ACCOUNT")) jdbc.update("UPDATE `appUser` SET `status`='DELETION_PENDING',`version`=`version`+1,`updatedAt`=? WHERE `id`=?",time(now),bin(user));
+		if (receipt.scope().equals("ACCOUNT")) {
+			// 완료 세션이 보존 정리된 회원도 정확한 접수 전 상태로 복구할 수 있도록 최소 상태만 암호화한다.
+			String previous=jdbc.queryForObject("SELECT `status` FROM `appUser` WHERE `id`=?",String.class,bin(user));
+			String ref=keys.create(UUID.randomUUID());
+			byte[] cipher=crypto.seal(keys.read(ref),"DELETION_ROLLBACK:"+receipt.id(),previous.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			jdbc.update("UPDATE `deletionJob` SET `cleanupCipher`=?,`cleanupKeyRef`=? WHERE `id`=?",cipher,ref,bin(receipt.id()));
+			jdbc.update("UPDATE `appUser` SET `status`='DELETION_PENDING',`version`=`version`+1,`updatedAt`=? WHERE `id`=?",time(now),bin(user));
+		}
 	}
 }

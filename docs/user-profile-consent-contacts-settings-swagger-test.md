@@ -35,7 +35,7 @@ AI_CALL 철회 접수는 통화를 즉시 종료하고 AI_DATA 작업을 생성�
 
 U06의 202는 접수 성공이므로 데이터 삭제 완료로 판정하지 않는다. 현재 GRANTED인 동의를 U05의 DECLINED로 바꾸려 하면 WITHDRAWAL_REQUIRED이며 U06을 사용해야 한다.
 
-같은 U06 키와 본문은 60초간 동일 접수증 쿠키와 현재 작업 상태를 재생한다. ACCOUNT 로컬 삭제는 그 뒤 시작하며 LOCAL_DELETED와 데이터 삭제를 함께 커밋한다. 외부 연결 정리와 6장 조회 API는 후속 범위다. DB 실패 테스트에서는 데이터와 키가 유지되어야 하며 불확실한 커밋을 FAILED로 단정하지 않는다.
+같은 U06 키와 본문은 60초간 동일 접수증 쿠키와 현재 작업 상태를 재생한다. ACCOUNT 로컬 삭제는 그 뒤 시작하며 LOCAL_DELETED와 데이터 삭제를 함께 커밋한다. 외부 연결 정리와 R03 조회는 [6장 가이드](usage-history-data-deletion-test.md)를 따른다. DB 실패 테스트에서는 데이터와 키가 유지되어야 하며 불확실한 커밋을 FAILED로 단정하지 않는다.
 
 DeletionView 필드는 `id`, `scope`, `status`, `requestedAt`, `dueAt`, `completedAt`, `errorCode`다. `dueAt`은 목표 기한이며 완료 증명이 아니다. 접수증 token은 JSON에서 찾거나 별도 저장하지 않는다.
 

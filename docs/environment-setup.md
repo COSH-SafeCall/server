@@ -22,6 +22,7 @@
 | SERVER_PORT | 서버 포트 / `8081` |
 | SWAGGER_ENABLED | local Swagger 공개 여부 / `true` |
 | WEB_ORIGIN | 페이지와 API의 정확한 origin / `http://localhost:8081` |
+| WEB_VERSION | O01 서버 배포 버전 / `4.2-web-mvp`. 영숫자로 시작하는 1~40자, 영숫자·`.`·`_`·`+`·`-`만 허용. 개인정보 없는 공개 릴리스 식별자를 사용하며 빈 값은 시작 실패 |
 | CSRF_SECRET / HMAC_SECRET / RESPONSE_ENCRYPTION_SECRET | 서로 다른 난수 32바이트를 Base64로 인코딩한 값. 모두 필수 |
 | CRYPTO_KEY_DIRECTORY | local DB 외부 키 디렉터리 / `.keys` |
 
@@ -34,6 +35,7 @@
 | KAKAO_APP_ID | 숫자 앱 ID / `0`은 실제 앱 설정 전 상태 |
 | KAKAO_CLIENT_ID | REST API 키 / 미설정 시 OAuth 시작 불가 |
 | KAKAO_CLIENT_SECRET | 앱에서 활성화한 client secret / 미사용 시 생략 가능 |
+| KAKAO_ADMIN_KEY | ACCOUNT 로컬 삭제 후 연결 해제용 서버 전용 Service app admin key. 미설정 시 LOCAL_DELETED에서 재시도 |
 | KAKAO_REDIRECT_URI | 정확히 `WEB_ORIGIN` + `/api/v1/auth/kakao/callback` |
 | KAKAO_LOGIN_SCOPES | 앱 승인 범위에 맞춘 항목 / `name,gender,birthday,birthyear,phone_number` |
 | AUTH_REQUESTS_PER_MINUTE | 인증 시작 IP별 분당 제한 / `10` |

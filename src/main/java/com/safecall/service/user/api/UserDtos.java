@@ -41,7 +41,10 @@ public final class UserDtos {
 	public record ConsentView(String code, int currentVersion, Integer decisionVersion, String action, boolean isEffective, Instant recordedAt) {}
 	public record WithdrawRequest() {}
 	public record DeleteContactRequest(@NotNull @Positive Long expectedVersion) {}
-	public record DeletionView(UUID id,String scope,String status,Instant requestedAt,Instant dueAt,Instant completedAt,String errorCode) {}
+	public record DeletionView(UUID id,
+		@io.swagger.v3.oas.annotations.media.Schema(allowableValues={"ACCOUNT","USAGE_HISTORY","AI_DATA","LOCATION_DATA"}) String scope,
+		@io.swagger.v3.oas.annotations.media.Schema(allowableValues={"PENDING","PROCESSING","LOCAL_DELETED","COMPLETED","FAILED"}) String status,
+		Instant requestedAt,Instant dueAt,Instant completedAt,String errorCode) {}
 	public record DeletionReceipt(UUID id, String scope, String status, String receiptToken, Instant dueAt, Instant receiptExpiresAt) {
 		@Override public String toString() { return "DeletionReceipt[redacted]"; }
 	}
