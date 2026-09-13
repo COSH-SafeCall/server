@@ -1,0 +1,95 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: safecall-prod-deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/cosh-safecall/safecall-server
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Grant execute permission for Gradle
+        run: chmod +x gradlew
+
+      - name: Build boot jar
+        run: ./gradlew clean bootJar -x test
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+
+            cd ${{ secrets.EC2_DEPLOY_PATH }}
+
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
+
+            INFRA_SOURCE_DIR="${INFRA_SOURCE_DIR:-/home/ec2-user/source/SafeCall_infra}"
+
+            if [ ! -d "$INFRA_SOURCE_DIR/.git" ]; then
+              mkdir -p "$(dirname "$INFRA_SOURCE_DIR")"
+              git clone https://github.com/COSH-SafeCall/SafeCall_infra.git "$INFRA_SOURCE_DIR"
+            else
+              git -C "$INFRA_SOURCE_DIR" pull --ff-only
+            fi
+
+            mkdir -p scripts
+            cp "$INFRA_SOURCE_DIR/scripts/deploy.sh" scripts/deploy.sh
+            chmod +x scripts/deploy.sh
+
+            bash scripts/deploy.sh
