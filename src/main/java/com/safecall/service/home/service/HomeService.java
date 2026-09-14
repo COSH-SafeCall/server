@@ -1,6 +1,5 @@
 package com.safecall.service.home.service;
 
-import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -24,10 +23,9 @@ public class HomeService {
 	private final AuthRepository auth;
 	private final UserRepository users;
 	private final HomeRepository repository;
-	private final Clock clock;
 	public HomeService(AuthTransactions authentication, AuthRepository auth, UserRepository users,
-		HomeRepository repository, Clock clock) {
-		this.authentication=authentication; this.auth=auth; this.users=users; this.repository=repository; this.clock=clock;
+		HomeRepository repository) {
+		this.authentication=authentication; this.auth=auth; this.users=users; this.repository=repository;
 	}
 	public HomeView home(String access) {
 		var session=authentication.authenticated(access);
@@ -45,11 +43,8 @@ public class HomeService {
 		return new HomeView(reasons.isEmpty(),List.copyOf(reasons),isGranted(user.id(),"LOCATION_PROCESSING"),count,"MEMBER");
 	}
 	private boolean isGranted(UUID userId, String code) {
-		var document=users.documents(false).stream().filter(d -> d.code().equals(code) && d.isConsent()
-			&& !d.publishedAt().isAfter(clock.instant())).findFirst().orElse(null);
-		if (document==null) return false;
 		var event=users.latest(userId,code);
-		return event!=null && event.action().equals("GRANTED") && event.version()==document.version();
+		return event!=null && event.action().equals("GRANTED") && event.version()==com.safecall.service.user.service.ConsentPolicy.VERSION;
 	}
 	public CallOptionsView callOptions(String access) {
 		// Authenticate before the controller evaluates If-None-Match, including 304 requests.

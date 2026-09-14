@@ -112,27 +112,6 @@ CREATE TABLE `userSetting` (
 	CONSTRAINT `ckUserSetting2` CHECK (`version`>0)
 ) ENGINE=InnoDB COMMENT='사용자 설정: 회원별 1개; RINGTONE 기본, SILENT 허용. 브라우저 권한을 설정 칼럼으로 저장하지 않음';
 
-CREATE TABLE `serviceDocument` (
-	`code` VARCHAR(24) NOT NULL COMMENT '문서/상황/상대 또는 허용된 운영 이벤트 코드; 해당 CHECK 및 API 허용목록 참조',
-	`version` INT NOT NULL COMMENT '문서 버전; code와 복합 기본키, 발행 후 불변',
-	`title` TEXT NOT NULL COMMENT '문서 제목',
-	`body` TEXT NOT NULL COMMENT '개인정보가 없는 동의/안내 문서 본문',
-	`isConsent` TINYINT(1) NOT NULL COMMENT '동의 대상 문서 여부',
-	`isRequired` TINYINT(1) NOT NULL DEFAULT false COMMENT '필수 동의 여부; 안내 문서는 false',
-	`isCurrent` TINYINT(1) NOT NULL DEFAULT false COMMENT '현재 사용 중인 문서 버전 여부',
-	`publishedAt` DATETIME(6) NOT NULL COMMENT '콘텐츠 발행 시각',
-	`currentMarker` TINYINT GENERATED ALWAYS AS (CASE WHEN `isCurrent` THEN 1 ELSE NULL END) STORED COMMENT '조건을 만족하는 행은 1, 그 외 NULL; 조건부 유일성을 강제하는 DB 생성 컬럼. API 입력/수정 금지',
-	CONSTRAINT `ckServiceDocument1` CHECK (`code` IN ('PRIVACY_PROCESSING','AI_CALL','LOCATION_PROCESSING', 'PRIVACY_NOTICE','AI_POLICY','HELP','SOS_GUIDE','PRE_CALL_NOTICE')),
-	CONSTRAINT `ckServiceDocument2` CHECK (`version`>0),
-	CONSTRAINT `ckServiceDocument3` CHECK (`isConsent` IN (0,1)),
-	CONSTRAINT `ckServiceDocument4` CHECK (`isRequired` IN (0,1)),
-	CONSTRAINT `ckServiceDocument5` CHECK (`isCurrent` IN (0,1)),
-	PRIMARY KEY(`code`,`version`),
-	CONSTRAINT `ckServiceDocument6` CHECK (NOT `isRequired` OR `isConsent`),
-	CONSTRAINT `ckServiceDocument7` CHECK (`isConsent` = (`code` IN ('PRIVACY_PROCESSING','AI_CALL','LOCATION_PROCESSING'))),
-	CONSTRAINT `uqServiceDocument1` UNIQUE(`code`,`currentMarker`)
-) ENGINE=InnoDB COMMENT='서비스 문서 버전: 코드별 current 최대1. 동의 코드와 안내 코드를 구분. 발행된 문서 내용은 불변';
-
 CREATE TABLE `oauthConsent` (
 	`attemptId` BINARY(16) NOT NULL COMMENT '사용자가 서비스 동의 후 시작한 OAuth 시도',
 	`documentCode` VARCHAR(24) NOT NULL COMMENT '서비스 동의 문서 코드; 안내 문서는 금지',
@@ -141,8 +120,8 @@ CREATE TABLE `oauthConsent` (
 	`recordedAt` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '서버 접수 시각; 프로필/연락처 값은 저장하지 않음',
 	PRIMARY KEY (`attemptId`,`documentCode`),
 	CONSTRAINT `fkOauthConsentAttempt` FOREIGN KEY (`attemptId`) REFERENCES `oauthAttempt` (`id`) ON DELETE CASCADE,
-	CONSTRAINT `fkOauthConsentDocument` FOREIGN KEY (`documentCode`,`documentVersion`) REFERENCES `serviceDocument` (`code`,`version`),
 	CONSTRAINT `ckOauthConsentCode` CHECK (`documentCode` IN ('PRIVACY_PROCESSING','AI_CALL','LOCATION_PROCESSING')),
+	CONSTRAINT `ckOauthConsentVersion` CHECK (`documentVersion`=1),
 	CONSTRAINT `ckOauthConsentAction` CHECK (`action` IN ('GRANTED','DECLINED')),
 	CONSTRAINT `ckOauthConsentRequired` CHECK (`documentCode`='LOCATION_PROCESSING' OR `action`='GRANTED')
 ) ENGINE=InnoDB COMMENT='회원 프로필 수집 이전 서비스 동의 스냅샷. 로그인 성공 트랜잭션에서 consentEvent로 연계';
@@ -157,10 +136,10 @@ CREATE TABLE `consentEvent` (
 	PRIMARY KEY(`id`),
 	CONSTRAINT `fkConsentEvent1` FOREIGN KEY(`userId`) REFERENCES `appUser`(`id`) ON DELETE CASCADE,
 	CONSTRAINT `ckConsentEvent1` CHECK (`action` IN ('GRANTED','DECLINED','WITHDRAWN')),
-	CONSTRAINT `fkConsentEvent2` FOREIGN KEY(`documentCode`,`documentVersion`) REFERENCES `serviceDocument`(`code`,`version`),
 	INDEX `ixConsentLatest` (`userId`,`documentCode`,`recordedAt` DESC,`id` DESC),
-	CONSTRAINT `ckConsentDocumentCode` CHECK (`documentCode` IN ('PRIVACY_PROCESSING','AI_CALL','LOCATION_PROCESSING'))
-) ENGINE=InnoDB COMMENT='동의 사건: 회원/문서 버전 FK. 최신 이벤트와 현재 버전으로 효력을 계산. 동의 누락을 자동 동의로 만들지 않음';
+	CONSTRAINT `ckConsentDocumentCode` CHECK (`documentCode` IN ('PRIVACY_PROCESSING','AI_CALL','LOCATION_PROCESSING')),
+	CONSTRAINT `ckConsentDocumentVersion` CHECK (`documentVersion`=1)
+) ENGINE=InnoDB COMMENT='동의 사건: 정적 프론트 문서의 고정 버전 1 선택 이력. 최신 이벤트로 효력을 계산. 동의 누락을 자동 동의로 만들지 않음';
 
 CREATE TABLE `emergencyContact` (
 	`id` BINARY(16) NOT NULL COMMENT '서버가 생성한 UUID 식별자',
@@ -466,7 +445,7 @@ INSERT INTO `counterpart` (`code`,`label`,`displayName`,`sortOrder`) VALUES
  ('FATHER','아빠','아빠',1),('MOTHER','엄마','엄마',2),('FRIEND','친구','친구',3);
 COMMIT;
 
--- serviceDocument와 promptRelease/personaPrompt는 검수된 본문·모델·음성으로 별도 발행.
+-- 동의·안내 문구는 프론트엔드 정적 콘텐츠다. promptRelease/personaPrompt는 검수된 모델·음성으로 별도 발행.
 -- 발행 서비스가 정확히 12개 페르소나와 안전성 검증을 확인한다.
 -- 잠금 순서: appUser → webSession → callSession → connectionGrant. 외부 호출 중 DB 잠금 금지.
 -- 종료 상태 되돌리기 금지, 재개 세대/만료/권한/동의는 API 및 서비스 트랜잭션에서 검증.
@@ -475,7 +454,7 @@ COMMIT;
 -- operationEvent는 webSession에서 회원을 도출한다. deletionJob.userId는 SET NULL.
 -- 보관 기간·운영 정책·데이터 이관은 논리 설계 T01~T06 및 최종 운영 정책/변경 대응표 참조.
 
--- 동의 문서는 최초 발행 버전 고정. CONSENTS는 호환성 예약값으로 서비스 전이 금지.
+-- 동의 문구는 프론트엔드 정적 콘텐츠이고 version=1 고정. CONSENTS는 호환성 예약값으로 서비스 전이 금지.
 -- 삭제 FAILED는 대상 데이터/키 유지 및 전체 롤백인 경우만. LOCAL_DELETED는 외부 정리 진행.
 -- 멱등 operation은 고정 코드, 소유자와 대상은 scopeHash에 포함(API 0.2.1).
 

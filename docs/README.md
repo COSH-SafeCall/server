@@ -6,6 +6,7 @@ SafeCall 웹 MVP API 1~7장. 현재 실행·구조·검증에 필요한 문서�
 |---|---|
 | 처음 실행 | [환경 설정](setup.md) → [DB 설치·마이그레이션](database.md) |
 | 코드 이해 | [서비스 구조·핵심 정책·API 목록](architecture.md) |
+| 프론트 동의 연동 | [정적 동의·안내 계약](frontend-static-content.md) |
 | API 수동 확인 | [Swagger 테스트 시작](swagger/README.md) |
 | 자동 테스트와 결과 | [검증](verification.md) · [결과 JSON](verification-results.json) |
 | 운영 전환 | [배포 조건](deployment.md) |

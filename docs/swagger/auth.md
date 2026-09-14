@@ -20,8 +20,8 @@ SOS_GUIDE에서는 step을 바꾸고 최신 version을 사용한다. 각 새 단
 
 ## 회원: 동의 → OAuth → 프로필 → 온보딩
 
-1. U03 `GET /documents/{code}`로 PRIVACY_PROCESSING, AI_CALL, LOCATION_PROCESSING을 각각 읽는다. 로그인 없이 조회하며 발행된 version을 기록한다.
-2. A02 `POST /auth/kakao/authorization`에 아래 본문과 현재 CSRF를 보낸다. 예시 version=1은 실제 값으로 바꾼다. 필수 두 문서는 GRANTED, 위치는 선택이다.
+1. 프론트엔드의 정적 동의 문구에서 개인정보 처리, AI 통화 이용, 위치 처리 항목을 안내한다. 세 동의의 계약 버전은 항상 1이다.
+2. A02 `POST /auth/kakao/authorization`에 아래 본문과 현재 CSRF를 보낸다. 필수 두 항목은 GRANTED, 위치는 사용자의 선택이다.
 3. 200 응답의 authorizationUrl로 **브라우저를 이동**한다. callback을 Swagger에서 직접 조립하거나 반복 호출하지 않는다.
 4. callback의 303 이동이 끝나면 같은 origin Swagger로 돌아와 A05를 다시 실행한다. 백엔드만 실행 중이면 최종 SPA 화면이 없어도 callback 처리와 A05 결과를 구분해 확인한다.
 5. A06 step/version을 읽고 다음 표대로 진행한다. 각 A07은 200이며 현재 step/version과 해당 단계의 추가 필드만 보낸다.

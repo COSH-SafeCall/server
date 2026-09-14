@@ -120,13 +120,11 @@ public class AuthRepository {
 	public List<String> missingConsents(UUID userId) {
 		if (userId == null) return List.of();
 		return List.of("PRIVACY_PROCESSING", "AI_CALL").stream().filter(code -> !Boolean.TRUE.equals(jdbc.queryForObject("""
-			SELECT EXISTS(SELECT 1 FROM `serviceDocument` d
-			WHERE d.`code`=? AND d.`isCurrent`=1 AND d.`isRequired`=1 AND d.`isConsent`=1
-			AND EXISTS(SELECT 1 FROM `consentEvent` e WHERE e.`id`=(
-				SELECT e2.`id` FROM `consentEvent` e2 WHERE e2.`userId`=? AND e2.`documentCode`=d.`code`
+			SELECT EXISTS(SELECT 1 FROM `consentEvent` e WHERE e.`id`=(
+				SELECT e2.`id` FROM `consentEvent` e2 WHERE e2.`userId`=? AND e2.`documentCode`=?
 				ORDER BY e2.`recordedAt` DESC,e2.`id` DESC LIMIT 1)
-			AND e.`action`='GRANTED' AND e.`documentVersion`=d.`version`))
-			""", Boolean.class, code, bin(userId)))).toList();
+			AND e.`action`='GRANTED' AND e.`documentVersion`=1)
+			""", Boolean.class, bin(userId),code))).toList();
 	}
 	public void advance(Session session, Step next, Instant now) {
 		jdbc.update("UPDATE `webSession` SET `onboardingStep`=?,`version`=`version`+1 WHERE `id`=? AND `version`=?", next.name(), bin(session.id()),session.version());

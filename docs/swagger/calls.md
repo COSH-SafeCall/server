@@ -1,6 +1,6 @@
 # AI 통화 C01~C07
 
-[테스트 시작](README.md) · 온보딩 COMPLETE와 [검수된 Gemini·프롬프트](../setup.md#문서와-프롬프트-발행) 필요
+[테스트 시작](README.md) · 온보딩 COMPLETE와 [검수된 Gemini·프롬프트](../setup.md#프롬프트-발행) 필요
 
 ## 1. 페이지 키 준비
 

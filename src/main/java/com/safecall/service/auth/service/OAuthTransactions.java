@@ -16,6 +16,7 @@ import com.safecall.service.common.crypto.*;
 import com.safecall.service.common.error.*;
 import com.safecall.service.user.api.UserDtos.*;
 import com.safecall.service.user.repository.UserRepository;
+import com.safecall.service.user.service.ConsentPolicy;
 @Service
 @Transactional(isolation=Isolation.READ_COMMITTED)
 public class OAuthTransactions {
@@ -45,13 +46,11 @@ public class OAuthTransactions {
 		return new Start(state,expiry);
 	}
 	private void validateDecisions(List<Decision> decisions) {
-		if(decisions==null || decisions.size()!=3 || !decisions.stream().map(Decision::code).collect(java.util.stream.Collectors.toSet()).equals(Set.of("PRIVACY_PROCESSING","AI_CALL","LOCATION_PROCESSING")))
+		if(decisions==null || decisions.size()!=3 || !decisions.stream().map(Decision::code).collect(java.util.stream.Collectors.toSet()).equals(Set.copyOf(ConsentPolicy.CODES)))
 			throw new CustomException(ErrorCode.INVALID_CONSENT);
-		var docs=users.documents(true);
 		for(Decision d:decisions) {
-			if(!d.code().equals("LOCATION_PROCESSING") && d.action()!=DecisionAction.GRANTED)throw new CustomException(ErrorCode.CONSENT_REQUIRED);
-			if(docs.stream().noneMatch(doc->doc.code().equals(d.code()) && doc.version()==d.version() && doc.isConsent() && !doc.publishedAt().isAfter(now())))
-				throw new CustomException(ErrorCode.INVALID_CONSENT);
+			ConsentPolicy.require(d.code(),d.version());
+			if(ConsentPolicy.REQUIRED.contains(d.code()) && d.action()!=DecisionAction.GRANTED)throw new CustomException(ErrorCode.CONSENT_REQUIRED);
 		}
 	}
 	private List<Decision> decisions(UUID id) {

@@ -142,19 +142,14 @@ public class UserTransactions {
 	}
 	public Items<ConsentView> consents(String access) { return consentViews(authentication.member(access,false).userId()); }
 	private Items<ConsentView> consentViews(UUID user) {
-		return new Items<>(repository.documents(true).stream().filter(Document::isConsent).map(d -> {
-			Event latest=repository.latest(user,d.code());
-			return new ConsentView(d.code(),d.version(),latest==null?null:latest.version(),latest==null?null:latest.action(),
-				latest!=null && latest.action().equals("GRANTED") && latest.version()==d.version() && !d.publishedAt().isAfter(now()),latest==null?null:latest.recordedAt());
+		return new Items<>(ConsentPolicy.CODES.stream().map(code -> {
+			Event latest=repository.latest(user,code);
+			return new ConsentView(code,ConsentPolicy.VERSION,latest==null?null:latest.version(),latest==null?null:latest.action(),
+				latest!=null && latest.action().equals("GRANTED") && latest.version()==ConsentPolicy.VERSION,latest==null?null:latest.recordedAt());
 		}).toList());
 	}
 	private boolean valid(UUID user, String code) {
 		return consentViews(user).items().stream().anyMatch(c -> c.code().equals(code) && c.isEffective());
-	}
-	private Document document(String code, int version) {
-		DocumentService.consentCode(code);
-		return repository.documents(true).stream().filter(d -> d.code().equals(code) && d.version()==version && d.isConsent() && !d.publishedAt().isAfter(now())).findFirst()
-			.orElseThrow(() -> new CustomException(ErrorCode.INVALID_CONSENT));
 	}
 	public Items<ConsentView> decide(String access, DecisionsRequest input, UUID key) {
 		Session session=authentication.member(access,false); UUID user=session.userId();
@@ -162,7 +157,7 @@ public class UserTransactions {
 		if (request.decisions().stream().map(Decision::code).distinct().count()!=request.decisions().size()) throw new CustomException(ErrorCode.INVALID_CONSENT);
 		if (replay(session,"CONSENT_UPDATE",key,request)!=null) return consentViews(user);
 		for (Decision decision:request.decisions()) {
-			document(decision.code(),decision.version());
+			ConsentPolicy.require(decision.code(),decision.version());
 			String cleanupScope=switch(decision.code()){case "AI_CALL"->"AI_DATA";case "LOCATION_PROCESSING"->"LOCATION_DATA";default->"ACCOUNT";};
 			if (decision.action()==DecisionAction.GRANTED && (repository.pending(user,"ACCOUNT") || repository.pending(user,cleanupScope))) throw new CustomException(ErrorCode.DATA_CLEANUP_PENDING);
 			Event previous=repository.latest(user,decision.code());
@@ -173,7 +168,7 @@ public class UserTransactions {
 	}
 	public WithdrawalResult withdraw(String access, String code, WithdrawRequest body, UUID key) {
 		Session session=authentication.member(access,true); UUID user=session.userId();
-		DocumentService.consentCode(code);
+		ConsentPolicy.requireCode(code);
 		var request=Map.of("code",code);
 		Replay replay=replay(session,"CONSENT_WITHDRAWAL",key,request);
 		if (replay!=null) {
@@ -182,13 +177,12 @@ public class UserTransactions {
 			return new WithdrawalResult(repository.deletionView(saved.deletion().id()),saved.deletion().receiptToken(),saved.deletion().receiptExpiresAt());
 		}
 		if ("DELETION_PENDING".equals(user(session).status())) throw new CustomException(ErrorCode.ACCOUNT_DELETION_PENDING);
-		int documentVersion=repository.documents(true).stream().filter(d->d.code().equals(code)&&d.isConsent()).findFirst().orElseThrow(()->new CustomException(ErrorCode.DOCUMENT_NOT_READY)).version();
 		if(code.equals("PRIVACY_PROCESSING"))authentication.requireSensitive(session);
 		String scope=switch(code) { case "PRIVACY_PROCESSING" -> "ACCOUNT"; case "AI_CALL" -> "AI_DATA"; default -> "LOCATION_DATA"; };
 		if (repository.pending(user,scope)) throw new CustomException(ErrorCode.DATA_CLEANUP_PENDING);
 		Instant now=now(); String receiptToken=crypto.randomToken();
 		var receipt=new DeletionReceipt(UUID.randomUUID(),scope,"PENDING",receiptToken,now.plusSeconds(86400),now.plusSeconds(30*86400));
-		repository.decision(user,code,documentVersion,"WITHDRAWN",now);
+		repository.decision(user,code,ConsentPolicy.VERSION,"WITHDRAWN",now);
 		if (!scope.equals("LOCATION_DATA")) {
 			for (UUID id:repository.sessions(user)) {
 				Session locked=auth.lockSession(id);

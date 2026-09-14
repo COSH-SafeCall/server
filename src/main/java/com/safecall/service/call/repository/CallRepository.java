@@ -141,13 +141,12 @@ public class CallRepository {
 			OR (g.`status`='ISSUING' AND (g.`issuingStartedAt` IS NULL OR g.`issuingStartedAt`<=?))))) ORDER BY c.`createdAt` LIMIT 100
 			""",(r,n)->uuid(r,"id"),time(now),time(now),time(now),time(now.minusSeconds(policy.issueTimeoutSeconds())));
 	}
-	public boolean hasConsent(UUID user,String code,Instant now) {
+	public boolean hasConsent(UUID user,String code) {
 		return Boolean.TRUE.equals(jdbc.queryForObject("""
-			SELECT EXISTS(SELECT 1 FROM `serviceDocument` d WHERE d.`code`=? AND d.`isCurrent`=1
-			AND d.`isConsent`=1 AND d.`publishedAt`<=? AND EXISTS(SELECT 1 FROM `consentEvent` e WHERE
-			e.`id`=(SELECT e2.`id` FROM `consentEvent` e2 WHERE e2.`userId`=? AND e2.`documentCode`=d.`code`
-			ORDER BY e2.`recordedAt` DESC,e2.`id` DESC LIMIT 1) AND e.`action`='GRANTED' AND e.`documentVersion`=d.`version`))
-			""",Boolean.class,code,time(now),bin(user)));
+			SELECT EXISTS(SELECT 1 FROM `consentEvent` e WHERE
+			e.`id`=(SELECT e2.`id` FROM `consentEvent` e2 WHERE e2.`userId`=? AND e2.`documentCode`=?
+			ORDER BY e2.`recordedAt` DESC,e2.`id` DESC LIMIT 1) AND e.`action`='GRANTED' AND e.`documentVersion`=1)
+			""",Boolean.class,bin(user),code));
 	}
 	public int rate(byte[] scope,String kind,String operation,Instant window,int seconds,boolean increment) {
 		if(increment) jdbc.update("""

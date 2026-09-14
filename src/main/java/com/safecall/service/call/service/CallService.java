@@ -42,7 +42,7 @@ public class CallService {
 		if(s.step()!=Step.COMPLETE)throw new CustomException(ErrorCode.ONBOARDING_REQUIRED);
 		if(s.userId()!=null){
 			if(users.pending(s.userId(),"ACCOUNT")||users.pending(s.userId(),"AI_DATA"))throw new CustomException(ErrorCode.DATA_CLEANUP_PENDING);
-			if(!repository.hasConsent(s.userId(),"PRIVACY_PROCESSING",now())||!repository.hasConsent(s.userId(),"AI_CALL",now()))throw new CustomException(ErrorCode.CONSENT_REQUIRED);
+			if(!repository.hasConsent(s.userId(),"PRIVACY_PROCESSING")||!repository.hasConsent(s.userId(),"AI_CALL"))throw new CustomException(ErrorCode.CONSENT_REQUIRED);
 		}
 	}
 	private Replay replay(Session s,UUID id,String op,UUID key,byte[] hash){Replay r=auth.replay(scope(s,id),op,key);if(r!=null){match(r.requestHash(),hash);if(!r.status().equals("DONE"))throw new CustomException(ErrorCode.REQUEST_IN_PROGRESS,1);}return r;}

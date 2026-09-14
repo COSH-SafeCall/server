@@ -1,74 +1,62 @@
 {
   "schema_matches_final": true,
-  "schema_sha256": "fbde83830a69900f9e50e9c328e885e2b53c13613a82e55be1c876aee1ada79b",
+  "schema_sha256": "b693349227c10471abc8b4a5374ede643d3dc4830fd98ac14385e0196f6083c3",
   "tasks": {
     "test": {
-      "tests": 56,
+      "tests": 62,
       "failures": 0,
       "errors": 0,
       "skipped": 0,
-      "latest_suite_timestamp": "2026-09-14T09:00:29.989Z"
+      "latest_suite_timestamp": "2026-09-14T16:47:55.208Z"
     },
     "integrationTest": {
-      "tests": 154,
+      "tests": 152,
       "failures": 0,
       "errors": 0,
       "skipped": 0,
-      "latest_suite_timestamp": "2026-09-14T09:00:38.439Z"
+      "latest_suite_timestamp": "2026-09-14T16:48:09.857Z"
     }
   },
-  "tested_worktree_base": "26f0286f7b3e1776891b111f5632008369d5cd0b",
+  "tested_worktree_base": "e93cf4cd6638b44f5c69ff12cdafbcdbb6b4e88f",
   "schema_counts": {
-    "tables": 20,
-    "columns": 197,
-    "constraints": 174
+    "tables": 19,
+    "columns": 188,
+    "constraints": 165
   },
   "schema_path": "current db/schema-mysql.sql on disposable MySQL",
-  "migration_path_rerun_this_revision": false,
+  "migration_path_rerun_this_revision": true,
   "external_providers": "mocked",
   "regressions": [
     "blockedAccountCleanupDoesNotDelayCallIssuanceOrExpiry",
     "blockedKeyDisposalDoesNotBlockExpiryCommitOrNewCall"
   ],
   "migration_verification": {
-    "scope": "Earlier 208-test run, before scheduling isolation; not a 210-test migration run",
-    "tested_worktree_base": "26f0286f7b3e1776891b111f5632008369d5cd0b",
-    "schema_path": "base 1f9b49c DDL plus all four migrations",
-    "schema_sha256": "fbde83830a69900f9e50e9c328e885e2b53c13613a82e55be1c876aee1ada79b",
-    "tasks": {
-      "test": {
-        "tests": 56,
-        "failures": 0,
-        "errors": 0,
-        "skipped": 0,
-        "latest_suite_timestamp": "2026-09-13T19:07:23.338Z"
-      },
-      "integrationTest": {
-        "tests": 152,
-        "failures": 0,
-        "errors": 0,
-        "skipped": 0,
-        "latest_suite_timestamp": "2026-09-13T19:07:35.236Z"
-      }
-    },
+    "scope": "Existing develop DDL plus static service document migration on isolated MySQL",
+    "tested_worktree_base": "e93cf4cd6638b44f5c69ff12cdafbcdbb6b4e88f",
+    "schema_path": "develop db/schema-mysql.sql plus 20260915-static-service-documents.sql",
+    "checks": [
+      "migration executes successfully",
+      "serviceDocument table is absent",
+      "oauthConsent and consentEvent each enforce documentVersion=1"
+    ],
     "migrations": [
       "20260913-key-discard-job.sql",
       "20260914-call-prompt-anchor.sql",
       "20260914-grant-issuing-start.sql",
-      "20260914-account-external-retry.sql"
+      "20260914-account-external-retry.sql",
+      "20260915-static-service-documents.sql"
     ]
   },
   "swagger_display_verification": {
-    "operations": 33,
+    "operations": 32,
     "groups": 11,
-    "method": "Actual test-server OpenAPI and Swagger initializer fetched; initializer comparator executed in Node.js",
+    "method": "Actual test-server OpenAPI checked by integration test; design routes checked by verification script",
     "browser_render_checked": false,
     "checks": [
-      "all operations grouped exactly once",
-      "A05 first",
-      "U09 before U10",
-      "C01 through C07",
-      "no URL sorter override"
+      "U03 path absent",
+      "32 unique design operations",
+      "required renewal path present",
+      "location and refresh routes absent"
     ]
   }
 }

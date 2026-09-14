@@ -68,7 +68,6 @@ Swagger 그룹과 API 표시 순서는 [OpenApiDisplayOrder](../src/main/java/co
 | A05 | GET `/auth/session` |
 | A06 / A07 | GET `/onboarding`, POST `/onboarding/advance` |
 | U01 / U02 | GET / PATCH `/me/profile` |
-| U03 | GET `/documents/{code}?version=...` |
 | U04 / U05 | GET / POST `/me/consents` |
 | U06 | POST `/me/consents/{code}/withdrawal` |
 | U07 / U08 | GET / POST `/me/emergency-contacts` |

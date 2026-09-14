@@ -83,6 +83,6 @@ void await refreshSession();
 | 409 | 현재 상태·version·멱등 충돌. REQUEST_IN_PROGRESS는 Retry-After 준수 |
 | 410 | 연결 grant의 시작 기한 만료. 이전 token 재사용 금지 |
 | 429 | Retry-After 대기. 같은 작업의 키·본문 유지 |
-| 503 | 외부 연동·문서/프롬프트 발행·검수 설정 |
+| 503 | 외부 연동·프롬프트 발행·검수 설정 |
 
 실패한 변경을 새 키로 자동 반복하지 않는다. 결과에는 시나리오·HTTP 상태·오류 code만 기록한다. 자동 검사와 실연동의 경계는 [검증 문서](../verification.md)를 참고한다.
