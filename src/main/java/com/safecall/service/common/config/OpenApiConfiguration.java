@@ -7,9 +7,10 @@ import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.*;
 import io.swagger.v3.oas.models.media.*;
 import io.swagger.v3.oas.models.parameters.Parameter;
+import io.swagger.v3.oas.models.servers.Server;
 @Configuration
 public class OpenApiConfiguration {
-	@Bean public OpenAPI safeCallApi(){return new OpenAPI().info(new Info().title("SafeCall Web MVP").version("4.2-web-mvp"))
+	@Bean public OpenAPI safeCallApi(){return new OpenAPI().servers(List.of(new Server().url("/"))).info(new Info().title("SafeCall Web MVP").version("4.2-web-mvp"))
 		.tags(OpenApiDisplayOrder.tags())
 		.components(new Components().addSecuritySchemes("webSession",new SecurityScheme().type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.COOKIE).name("__Host-safecall-session"))
 			.addSecuritySchemes("deletionReceipt",new SecurityScheme().type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.COOKIE).name("__Host-safecall-deletion")));}
