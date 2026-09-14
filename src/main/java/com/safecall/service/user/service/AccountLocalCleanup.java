@@ -44,7 +44,13 @@ public class AccountLocalCleanup {
 		try {
 			var abandoned=jdbc.queryForList("SELECT `id` FROM `appUser` WHERE `status`='ONBOARDING' AND `createdAt`<=? LIMIT 100",
 				byte[].class,time(clock.instant().minusSeconds(86400)));
-			for(byte[] id:abandoned)transaction.executeWithoutResult(tx -> queueAbandoned(uuid(id)));
+			for(byte[] id:abandoned) {
+				// Catch outside the transaction so rollback/uncertain-commit handling finishes first.
+				try { transaction.executeWithoutResult(tx -> queueAbandoned(uuid(id))); }
+				catch(RuntimeException ex) { failure(); }
+			}
+		} catch(RuntimeException ex) {failure();}
+		try {
 			// Preserve the complete 60 second receipt replay window before account rows disappear.
 			var jobs=jdbc.queryForList("SELECT `id`,`userId` FROM `deletionJob` WHERE `scope`='ACCOUNT' AND `status`='PENDING' AND `requestedAt`<=? LIMIT 100",
 				time(clock.instant().minusSeconds(60)));

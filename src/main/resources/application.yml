@@ -49,7 +49,7 @@ app:
       reviewed-browsers: ${MESSAGE_MAP_REVIEWED_BROWSERS:}
       validation-ref: ${MESSAGE_MAP_VALIDATION_REF:}
   web:
-    origin: ${WEB_ORIGIN:http://localhost:8081}
+    origin: ${WEB_ORIGIN:https://api.dev-safecall.r-e.kr}
   crypto:
     hmac-secret: ${HMAC_SECRET:}
     csrf-secret: ${CSRF_SECRET:}
@@ -60,7 +60,7 @@ app:
       client-id: ${KAKAO_CLIENT_ID:}
       client-secret: ${KAKAO_CLIENT_SECRET:}
       admin-key: ${KAKAO_ADMIN_KEY:}
-      redirect-uri: ${KAKAO_REDIRECT_URI:http://localhost:8081/api/v1/auth/kakao/callback}
+      redirect-uri: ${KAKAO_REDIRECT_URI:https://api.dev-safecall.r-e.kr/api/v1/auth/kakao/callback}
       login-scopes: ${KAKAO_LOGIN_SCOPES:name,gender,birthday,birthyear,phone_number}
   auth:
     requests-per-minute: ${AUTH_REQUESTS_PER_MINUTE:10}

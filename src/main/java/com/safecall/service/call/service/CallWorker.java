@@ -23,7 +23,13 @@ public class CallWorker {
 	@Scheduled(scheduler="callScheduler",fixedDelayString="${app.call.worker-delay-ms}",initialDelayString="${app.call.worker-delay-ms}")
 	public void tick() {
 		try {
-			for(UUID id:repository.expired(clock.instant()))service.reap(id);
+			for(UUID id:repository.expired(clock.instant())) {
+				try { service.reap(id); }
+				catch(RuntimeException exception) { failure(); }
+			}
+		} catch(RuntimeException exception) { failure(); }
+		// New issuance can proceed even when expiry lookup or an individual reaper fails.
+		try {
 			for(UUID id:repository.pending()) {
 				try { executor.execute(()->runOne(id)); }
 				catch(RejectedExecutionException busy) { break; }
