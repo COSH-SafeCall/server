@@ -23,13 +23,13 @@ public class HomeController {
 	private final JsonMapper mapper;
 	public HomeController(HomeService service, JsonMapper mapper) { this.service=service; this.mapper=mapper; }
 	@GetMapping(value="/api/v1/home",produces="application/json")
-	@Operation(operationId="H01",summary="H01 · 홈 기능 가능 여부 조회",tags="7. 홈·통화 선택지",
+	@Operation(operationId="H01",summary="H01 · 홈 기능 가능 여부 조회",
 		description="게스트·회원 세션 필요. 메시지 작성 자격과 차단 사유를 조회합니다. 브라우저 권한이나 실제 위치 취득 성공을 보장하지 않습니다.")
 	public HomeView home(@Parameter(hidden=true) @CookieValue(value="__Host-safecall-session",required=false) String authorization) {
 		return service.home(authorization);
 	}
 	@GetMapping(value="/api/v1/call-options",produces="application/json")
-	@Operation(operationId="H02",summary="H02 · 상황·통화 상대 조회",tags="7. 홈·통화 선택지",
+	@Operation(operationId="H02",summary="H02 · 상황·통화 상대 조회",
 		description="게스트·회원 세션 필요. 프롬프트 발행과 무관하게 고정 선택지를 반환합니다. If-None-Match에는 이전 ETag를 입력합니다.")
 	@ApiResponse(responseCode="200",description="고정 선택지 조회 성공",useReturnTypeSchema=true)
 	@ApiResponse(responseCode="304",description="변경 없음 (인증 검증 후 반환)",content=@Content)

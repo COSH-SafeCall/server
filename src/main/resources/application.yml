@@ -24,7 +24,6 @@ springdoc:
     path: /swagger-ui.html
     try-it-out-enabled: true
     persist-authorization: false
-    operations-sorter: alpha
     tags-sorter: alpha
     display-request-duration: true
     disable-swagger-default-url: true

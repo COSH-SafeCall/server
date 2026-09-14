@@ -10,11 +10,13 @@ import io.swagger.v3.oas.models.parameters.Parameter;
 @Configuration
 public class OpenApiConfiguration {
 	@Bean public OpenAPI safeCallApi(){return new OpenAPI().info(new Info().title("SafeCall Web MVP").version("4.2-web-mvp"))
+		.tags(OpenApiDisplayOrder.tags())
 		.components(new Components().addSecuritySchemes("webSession",new SecurityScheme().type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.COOKIE).name("__Host-safecall-session"))
 			.addSecuritySchemes("deletionReceipt",new SecurityScheme().type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.COOKIE).name("__Host-safecall-deletion")));}
 	@Bean public OperationCustomizer webContracts(){return (operation,handler)->{
 		String id=operation.getOperationId();
 		if(id==null)return operation;
+		OpenApiDisplayOrder.apply(operation);
 		String success=Map.of("A02_CALLBACK","303","A04","204","U06","202","U08","201","U10","204","C01","202","C07","202","R02","202","O01","202").get(id);
 		if(success!=null && !operation.getResponses().containsKey(success)) {
 			var response=operation.getResponses().remove("200");
