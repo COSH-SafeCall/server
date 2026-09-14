@@ -1,0 +1,74 @@
+{
+  "schema_matches_final": true,
+  "schema_sha256": "fbde83830a69900f9e50e9c328e885e2b53c13613a82e55be1c876aee1ada79b",
+  "tasks": {
+    "test": {
+      "tests": 56,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "latest_suite_timestamp": "2026-09-14T09:00:29.989Z"
+    },
+    "integrationTest": {
+      "tests": 154,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "latest_suite_timestamp": "2026-09-14T09:00:38.439Z"
+    }
+  },
+  "tested_worktree_base": "26f0286f7b3e1776891b111f5632008369d5cd0b",
+  "schema_counts": {
+    "tables": 20,
+    "columns": 197,
+    "constraints": 174
+  },
+  "schema_path": "current db/schema-mysql.sql on disposable MySQL",
+  "migration_path_rerun_this_revision": false,
+  "external_providers": "mocked",
+  "regressions": [
+    "blockedAccountCleanupDoesNotDelayCallIssuanceOrExpiry",
+    "blockedKeyDisposalDoesNotBlockExpiryCommitOrNewCall"
+  ],
+  "migration_verification": {
+    "scope": "Earlier 208-test run, before scheduling isolation; not a 210-test migration run",
+    "tested_worktree_base": "26f0286f7b3e1776891b111f5632008369d5cd0b",
+    "schema_path": "base 1f9b49c DDL plus all four migrations",
+    "schema_sha256": "fbde83830a69900f9e50e9c328e885e2b53c13613a82e55be1c876aee1ada79b",
+    "tasks": {
+      "test": {
+        "tests": 56,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "latest_suite_timestamp": "2026-09-13T19:07:23.338Z"
+      },
+      "integrationTest": {
+        "tests": 152,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "latest_suite_timestamp": "2026-09-13T19:07:35.236Z"
+      }
+    },
+    "migrations": [
+      "20260913-key-discard-job.sql",
+      "20260914-call-prompt-anchor.sql",
+      "20260914-grant-issuing-start.sql",
+      "20260914-account-external-retry.sql"
+    ]
+  },
+  "swagger_display_verification": {
+    "operations": 33,
+    "groups": 11,
+    "method": "Actual test-server OpenAPI and Swagger initializer fetched; initializer comparator executed in Node.js",
+    "browser_render_checked": false,
+    "checks": [
+      "all operations grouped exactly once",
+      "A05 first",
+      "U09 before U10",
+      "C01 through C07",
+      "no URL sorter override"
+    ]
+  }
+}
