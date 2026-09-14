@@ -13,6 +13,9 @@ def main():
 	parser = argparse.ArgumentParser(description=__doc__)
 	parser.add_argument('--mysql-bin', default='C:/Program Files/MySQL/MySQL Server 8.0/bin')
 	parser.add_argument('--schema', type=Path, default=Path(__file__).resolve().parents[1] / 'db/schema-mysql.sql')
+	parser.add_argument('--onboarding-migration-from', type=Path, help='Previous static-document schema to migrate on the disposable instance')
+	parser.add_argument('--schema-only', action='store_true', help='Skip Gradle; useful for migration and design checks')
+	parser.add_argument('--verify-design', action='store_true', help='Run design verification on the same disposable MySQL instance')
 	args = parser.parse_args()
 	server = Path(__file__).resolve().parents[1]
 	build = (server / 'build').resolve()
@@ -52,9 +55,18 @@ def main():
 		actual = subprocess.run([mysql, *connection, '-Nse', 'SELECT @@datadir'], capture_output=True,
 			text=True, check=True, creationflags=flags).stdout.strip()
 		assert Path(actual).resolve() == (work / 'data').resolve()
-		sql = args.schema.read_text(encoding='utf-8-sig').replace('`safecall`', '`' + database + '`')
+		sql = (args.onboarding_migration_from or args.schema).read_text(encoding='utf-8-sig').replace('`safecall`', '`' + database + '`')
 		subprocess.run([mysql, *connection, '--default-character-set=utf8mb4'], input=sql.encode('utf-8'),
 			check=True, creationflags=flags)
+		if args.onboarding_migration_from:
+			from verify_onboarding_migration import check_migration
+			check_migration(mysql, connection, database, server, flags)
+		if args.verify_design:
+			import sys
+			subprocess.run([sys.executable, str(server.parent / 'design/verification/verify.py'),
+				'--mysql', mysql, '--port', str(port)], check=True, creationflags=flags)
+		if args.schema_only:
+			return 0
 		env = os.environ.copy()
 		env['AUTH_TEST_DB_URL'] = f'jdbc:mysql://127.0.0.1:{port}/{database}?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true'
 		env['AUTH_TEST_KEY_DIRECTORY'] = str(work / 'keys')

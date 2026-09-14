@@ -22,7 +22,7 @@ CREATE TABLE `appUser` (
 	`kakaoSubjectHash` VARBINARY(32) NOT NULL COMMENT '카카오 회원번호의 용도 분리 HMAC-SHA-256; 계정 연결/중복 방지',
 	`kakaoSubjectCipher` BLOB NOT NULL COMMENT '카카오 회원번호 암호문; 탈퇴 시 연결 해제에 필요한 최소 정보',
 	`keyRef` TEXT NOT NULL COMMENT 'DB 외부 암호화 키의 참조값(키 원문 아님)',
-	`status` VARCHAR(24) NOT NULL DEFAULT 'ONBOARDING' COMMENT '처리/활성 상태; 허용값과 연관 조건은 아래 CHECK 참조',
+	`status` VARCHAR(24) NOT NULL DEFAULT 'ACTIVE' COMMENT '처리/활성 상태; 허용값과 연관 조건은 아래 CHECK 참조',
 	`nameCipher` BLOB  COMMENT '사용자 또는 보호자 이름의 인증 암호화 봉투',
 	`genderCipher` BLOB  COMMENT 'MALE/FEMALE 성별 암호문; 미확인 시 NULL',
 	`birthDateCipher` BLOB  COMMENT '확인된 양력 생년월일 암호문; 미확인 시 NULL',
@@ -37,7 +37,7 @@ CREATE TABLE `appUser` (
 	PRIMARY KEY(`id`),
 	CONSTRAINT `ckAppUser1` CHECK (octet_length(`kakaoSubjectHash`)=32),
 	CONSTRAINT `uqAppUser1` UNIQUE(`kakaoSubjectHash`),
-	CONSTRAINT `ckAppUser2` CHECK (`status` IN ('ONBOARDING','ACTIVE','DELETION_PENDING')),
+	CONSTRAINT `ckAppUser2` CHECK (`status` IN ('ACTIVE','DELETION_PENDING')),
 	CONSTRAINT `ckAppUser3` CHECK (`phoneHash` IS NULL OR octet_length(`phoneHash`)=32),
 	CONSTRAINT `ckAppUser4` CHECK (`genderSource` IN ('KAKAO','USER_CONFIRMED','UNKNOWN')),
 	CONSTRAINT `ckAppUser5` CHECK (`birthDateSource` IN ('KAKAO','USER_CONFIRMED','UNKNOWN')),
@@ -45,7 +45,7 @@ CREATE TABLE `appUser` (
 	CONSTRAINT `ckAppUser7` CHECK ((`phoneCipher` IS NULL) = (`phoneHash` IS NULL)),
 	CONSTRAINT `ckAppUser8` CHECK ((`genderCipher` IS NULL) = (`genderSource`='UNKNOWN')),
 	CONSTRAINT `ckAppUser9` CHECK ((`birthDateCipher` IS NULL) = (`birthDateSource`='UNKNOWN'))
-) ENGINE=InnoDB COMMENT='사용자: 카카오 subject 전역 유일. 계정은 ONBOARDING/ACTIVE/DELETION_PENDING. 프로필 미확인 항목은 null, UNKNOWN 출처와 동치';
+) ENGINE=InnoDB COMMENT='사용자: 카카오 subject 전역 유일. 계정은 ACTIVE/DELETION_PENDING. ACTIVE는 화면 완료를 의미하지 않음. 프로필 미확인 항목은 null, UNKNOWN 출처와 동치';
 
 CREATE TABLE `webSession` (
 	`id` BINARY(16) NOT NULL COMMENT '서버 UUID; 쿠키 원문과 다른 내부 식별자',
@@ -54,12 +54,10 @@ CREATE TABLE `webSession` (
 	`sensitiveVerifiedAt` DATETIME(6) COMMENT '동일 Kakao subject의 명시적 재인증 성공 시각; 일반 로그인은 NULL',
 	`userId` BINARY(16) COMMENT 'KAKAO 세션만 회원 참조',
 	`kind` VARCHAR(9) NOT NULL COMMENT 'ANONYMOUS/GUEST/KAKAO; 익명은 CSRF 및 OAuth 준비 전용',
-	`onboardingStep` VARCHAR(24) NOT NULL COMMENT '현재 화면 단계; 브라우저 권한 허용의 증거가 아님',
 	`status` VARCHAR(7) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/REVOKED/EXPIRED',
 	`createdAt` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT 'UTC 생성 시각',
 	`expiresAt` DATETIME(6) NOT NULL COMMENT '고정 만료; 게스트 전환은 최대 24시간',
 	`revokedAt` DATETIME(6) COMMENT 'REVOKED일 때만 존재',
-	`version` BIGINT NOT NULL DEFAULT 1 COMMENT '온보딩 변경 낙관적 잠금',
 	PRIMARY KEY (`id`),
 	CONSTRAINT `uqWebSessionHash` UNIQUE (`sessionHash`),
 	CONSTRAINT `fkWebSessionUser` FOREIGN KEY (`userId`) REFERENCES `appUser` (`id`),
@@ -68,12 +66,8 @@ CREATE TABLE `webSession` (
 	CONSTRAINT `ckWebSessionOwner` CHECK ((`kind`='KAKAO')=(`userId` IS NOT NULL)),
 	CONSTRAINT `ckWebSessionStatus` CHECK (`status` IN ('ACTIVE','REVOKED','EXPIRED')),
 	CONSTRAINT `ckWebSessionRevoked` CHECK ((`status`='REVOKED')=(`revokedAt` IS NOT NULL)),
-	CONSTRAINT `ckWebSessionStep` CHECK (`onboardingStep` IN ('ENTRY','PROFILE','CONTACTS','CONSENTS','PERMISSIONS','SOS_GUIDE','MESSAGE_TEST','COMPLETE')),
-	CONSTRAINT `ckWebSessionGuestStep` CHECK (`kind`<>'GUEST' OR `onboardingStep` IN ('PERMISSIONS','SOS_GUIDE','COMPLETE')),
-	CONSTRAINT `ckWebSessionAnonymousStep` CHECK ((`kind`='ANONYMOUS')=(`onboardingStep`='ENTRY')),
 	CONSTRAINT `ckWebSessionLifetime` CHECK (`expiresAt`>`createdAt`),
 	CONSTRAINT `ckWebSessionGuestLifetime` CHECK (`kind`<>'GUEST' OR `expiresAt`<=DATE_ADD(`createdAt`, INTERVAL 24 HOUR)),
-	CONSTRAINT `ckWebSessionVersion` CHECK (`version`>0),
 	CONSTRAINT `ckWebSensitiveOwner` CHECK (`sensitiveVerifiedAt` IS NULL OR `kind`='KAKAO'),
 	CONSTRAINT `ckWebSensitiveTime` CHECK (`sensitiveVerifiedAt` IS NULL OR (`sensitiveVerifiedAt`>=`createdAt` AND `sensitiveVerifiedAt`<`expiresAt`)),
 	INDEX `ixWebSessionUser` (`userId`),
@@ -111,20 +105,6 @@ CREATE TABLE `userSetting` (
 	CONSTRAINT `ckUserSetting1` CHECK (`incomingAlertMode` IN ('RINGTONE','SILENT')),
 	CONSTRAINT `ckUserSetting2` CHECK (`version`>0)
 ) ENGINE=InnoDB COMMENT='사용자 설정: 회원별 1개; RINGTONE 기본, SILENT 허용. 브라우저 권한을 설정 칼럼으로 저장하지 않음';
-
-CREATE TABLE `oauthConsent` (
-	`attemptId` BINARY(16) NOT NULL COMMENT '사용자가 서비스 동의 후 시작한 OAuth 시도',
-	`documentCode` VARCHAR(24) NOT NULL COMMENT '서비스 동의 문서 코드; 안내 문서는 금지',
-	`documentVersion` INT NOT NULL COMMENT '사용자가 읽고 결정한 정확한 문서 버전',
-	`action` VARCHAR(8) NOT NULL COMMENT 'GRANTED/DECLINED; 회원 연계 전 선택 기록',
-	`recordedAt` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '서버 접수 시각; 프로필/연락처 값은 저장하지 않음',
-	PRIMARY KEY (`attemptId`,`documentCode`),
-	CONSTRAINT `fkOauthConsentAttempt` FOREIGN KEY (`attemptId`) REFERENCES `oauthAttempt` (`id`) ON DELETE CASCADE,
-	CONSTRAINT `ckOauthConsentCode` CHECK (`documentCode` IN ('PRIVACY_PROCESSING','AI_CALL','LOCATION_PROCESSING')),
-	CONSTRAINT `ckOauthConsentVersion` CHECK (`documentVersion`=1),
-	CONSTRAINT `ckOauthConsentAction` CHECK (`action` IN ('GRANTED','DECLINED')),
-	CONSTRAINT `ckOauthConsentRequired` CHECK (`documentCode`='LOCATION_PROCESSING' OR `action`='GRANTED')
-) ENGINE=InnoDB COMMENT='회원 프로필 수집 이전 서비스 동의 스냅샷. 로그인 성공 트랜잭션에서 consentEvent로 연계';
 
 CREATE TABLE `consentEvent` (
 	`id` BINARY(16) NOT NULL COMMENT '서버가 생성한 UUID 식별자',

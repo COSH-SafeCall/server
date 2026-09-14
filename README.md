@@ -1,6 +1,6 @@
 # SafeCall 서버
 
-Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. 웹 MVP API 1~7장, 총 32개 HTTP 작업을 구현한다. 인증은 HttpOnly 세션 쿠키와 CSRF를 사용한다.
+Java 21 · Spring Boot 4.1 · MySQL 8.0.41 이상. 웹 MVP API 1~7장, 총 30개 HTTP 작업을 구현한다. 인증은 HttpOnly 세션 쿠키와 CSRF를 사용한다.
 
 | 시작점 | 문서 |
 |---|---|

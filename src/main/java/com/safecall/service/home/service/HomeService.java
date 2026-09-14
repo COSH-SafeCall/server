@@ -6,7 +6,6 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-import com.safecall.service.auth.api.AuthDtos.Step;
 import com.safecall.service.auth.repository.AuthRepository;
 import com.safecall.service.auth.service.AuthTransactions;
 import com.safecall.service.common.error.SessionInvalidException;
@@ -32,7 +31,6 @@ public class HomeService {
 		if (session.userId()==null) return new HomeView(false,List.of("LOGIN_REQUIRED"),false,0,"LOGIN_ONLY");
 		var user=auth.user(session.userId(),false);
 		var reasons=new ArrayList<String>();
-		if (session.step()!=Step.COMPLETE) reasons.add("ONBOARDING_REQUIRED");
 		if (user.confirmedAt()==null || user.nameCipher()==null || user.phoneCipher()==null) reasons.add("PROFILE_REQUIRED");
 		// Message eligibility requires privacy consent, independently of AI call consent.
 		if (!isGranted(user.id(),"PRIVACY_PROCESSING")) reasons.add("CONSENT_REQUIRED");

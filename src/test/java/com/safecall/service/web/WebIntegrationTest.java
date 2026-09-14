@@ -97,17 +97,17 @@ class WebIntegrationTest {
 	Browser bootstrap()throws Exception{Browser b=new Browser();var r=send("GET","/api/v1/auth/session",null,b,null);status(r,200);cookie(b,r);b.csrf=r.text("csrfToken");return b;}
 	List<Map<String,Object>> decisions(boolean location){return List.of(Map.of("code","PRIVACY_PROCESSING","version",1,"action","GRANTED"),Map.of("code","AI_CALL","version",1,"action","GRANTED"),Map.of("code","LOCATION_PROCESSING","version",1,"action",location?"GRANTED":"DECLINED"));}
 	String start(Browser b,String purpose,boolean location)throws Exception{
-		var r=send("POST","/api/v1/auth/kakao/authorization",purpose.equals("LOGIN")?Map.of("purpose",purpose,"decisions",decisions(location)):Map.of("purpose",purpose),b,null);status(r,200);
+		var r=send("POST","/api/v1/auth/kakao/authorization",Map.of("purpose",purpose),b,null);status(r,200);
 		return Arrays.stream(URI.create(r.text("authorizationUrl")).getRawQuery().split("&")).filter(s->s.startsWith("state=")).findFirst().orElseThrow().substring(6);
 	}
 	Result callback(Browser b,String state)throws Exception{return send("GET","/api/v1/auth/kakao/callback?state="+state+"&code=synthetic",null,b,null);}
 	void login(Browser b,String purpose,boolean location)throws Exception{var r=callback(b,start(b,purpose,location));status(r,303);cookie(b,r);var session=send("GET","/api/v1/auth/session",null,b,null);b.csrf=session.text("csrfToken");}
-	Browser member()throws Exception{Browser b=bootstrap();login(b,"LOGIN",false);return b;}
-	void advance(Browser b,String step)throws Exception{var state=send("GET","/api/v1/onboarding",null,b,null);Map<String,Object> body=new HashMap<>(Map.of("step",step,"expectedVersion",state.body().path("version").asLong()));
-		if(Set.of("PERMISSIONS","SOS_GUIDE").contains(step))body.put("isNoticeReviewed",true);if(step.equals("MESSAGE_TEST"))body.put("testDecision","SKIP");status(send("POST","/api/v1/onboarding/advance",body,b,UUID.randomUUID()),200);}
-	Browser guest()throws Exception{Browser b=bootstrap();var r=send("POST","/api/v1/auth/guest",Map.of(),b,null);status(r,200);cookie(b,r);b.csrf=r.text("csrfToken");advance(b,"PERMISSIONS");advance(b,"SOS_GUIDE");return b;}
+	Browser member()throws Exception{Browser b=bootstrap();login(b,"LOGIN",false);grant(b,false);return b;}
+	void grant(Browser b,boolean location)throws Exception{status(send("POST","/api/v1/me/consents",Map.of("decisions",decisions(location)),b,UUID.randomUUID()),200);}
+
+	Browser guest()throws Exception{Browser b=bootstrap();var r=send("POST","/api/v1/auth/guest",Map.of(),b,null);status(r,200);cookie(b,r);b.csrf=r.text("csrfToken");return b;}
 	Map<String,Object> profile(long version){Map<String,Object> body=new HashMap<>();body.put("name","홍길동");body.put("phone","+82 10-1234-5678");body.put("gender",null);body.put("birthDate",null);body.put("isConfirmed",true);body.put("expectedVersion",version);return body;}
-	void complete(Browser b)throws Exception{var p=send("GET","/api/v1/me/profile",null,b,null);status(send("PATCH","/api/v1/me/profile",profile(p.body().path("version").asLong()),b,UUID.randomUUID()),200);for(String step:List.of("PROFILE","CONTACTS","PERMISSIONS","SOS_GUIDE","MESSAGE_TEST"))advance(b,step);}
+	void complete(Browser b)throws Exception{var p=send("GET","/api/v1/me/profile",null,b,null);status(send("PATCH","/api/v1/me/profile",profile(p.body().path("version").asLong()),b,UUID.randomUUID()),200);}
 	UUID sessionId(Browser b){return authRepository.byCookie(crypto.hash("WEB_SESSION",b.cookie)).id();}
 	UUID userId(Browser b){return authRepository.byCookie(crypto.hash("WEB_SESSION",b.cookie)).userId();}
 	Map<String,Object> createBody(){return Map.of("clientCallId",UUID.randomUUID(),"startMode","QUICK","scenarioCode","FOLLOWED","counterpartCode","FATHER","microphonePermission","GRANTED");}
@@ -262,7 +262,8 @@ class WebIntegrationTest {
 		Browser b=member();var p=send("GET","/api/v1/me/profile",null,b,null);
 		var body=profile(p.body().path("version").asLong());body.put("gender",gender);body.put("birthDate",birth);
 		status(send("PATCH","/api/v1/me/profile",body,b,UUID.randomUUID()),200);
-		for(String step:List.of("PROFILE","CONTACTS","PERMISSIONS","SOS_GUIDE","MESSAGE_TEST"))advance(b,step);
+		// Existing accounts may retain verified Kakao demographics from before the migration.
+		jdbc.update("UPDATE `appUser` SET `genderSource`='KAKAO',`birthDateSource`='KAKAO' WHERE `id`=?",bin(userId(b)));
 		return b;
 	}
 	@Test void resumedMemberKeepsExactInitialInstructionAcrossBirthday()throws Exception{
@@ -470,7 +471,7 @@ class WebIntegrationTest {
 		assertThat(result.body().path("duplicateCount").asInt()).isEqualTo(duplicate);
 	}
 	@Test void telemetryAcceptsGuestsAndMembersBeforeOnboardingWithoutChangingState()throws Exception {
-		Browser member=member(),guest=guest();String step=send("GET","/api/v1/onboarding",null,member,null).text("step");
+		Browser member=member(),guest=guest();long version=authRepository.user(userId(member),false).version();
 		var event=telemetryEvent("MESSAGE_COMPOSER","COMPOSER_OPENED");event.put("isSuccess",true);event.put("latencyMs",3600000);event.put("networkType","UNKNOWN");
 		for(Browser browser:List.of(member,guest)) {
 			var result=telemetry(browser,List.of(event));eventCounts(result,1,0);
@@ -478,7 +479,7 @@ class WebIntegrationTest {
 		}
 		assertThat(telemetryCount()).isEqualTo(2);assertThat(telemetryRate()).isEqualTo(2);
 		assertThat(jdbc.queryForList("SELECT `webVersion` FROM `operationEvent` WHERE `category`<>'AUTH'",String.class)).containsOnly("synthetic-web-v7");
-		assertThat(send("GET","/api/v1/onboarding",null,member,null).text("step")).isEqualTo(step);assertThat(count("callSession")).isZero();
+		assertThat(authRepository.user(userId(member),false).version()).isEqualTo(version);assertThat(count("callSession")).isZero();
 	}
 	@Test void telemetryRequiresAuthenticatedSessionOriginAndCsrf()throws Exception {
 		Browser anonymous=bootstrap(),b=guest();var batch=List.of(telemetryEvent("SOS","SOS_GUIDE_VIEWED"));String body=mapper.writeValueAsString(Map.of("events",batch));
@@ -631,7 +632,7 @@ class WebIntegrationTest {
 	@Test void anonymousCookieAndStableCsrfArePrivate()throws Exception{
 		var first=send("GET","/api/v1/auth/session",null,null,null);status(first,200);String cookie=first.headers().firstValue("Set-Cookie").orElseThrow();
 		assertThat(cookie).contains("__Host-safecall-session=","Secure","HttpOnly","SameSite=Lax","Path=/").doesNotContain("Domain");
-		assertThat(first.body().properties()).hasSize(6);assertThat(first.text("kind")).isEqualTo("ANONYMOUS");
+		assertThat(first.body().properties()).hasSize(5);assertThat(first.text("kind")).isEqualTo("ANONYMOUS");
 		Browser b=bootstrap();var second=send("GET","/api/v1/auth/session",null,b,null);assertThat(second.text("csrfToken")).isEqualTo(b.csrf);assertThat(second.headers().allValues("Set-Cookie")).isEmpty();assertThat(count("appUser")).isZero();
 	}
 	@Test void bootstrapRejectsUnverifiableAndForeignOrigins()throws Exception{
@@ -646,22 +647,54 @@ class WebIntegrationTest {
 		Browser b=bootstrap();status(send("POST","/api/v1/auth/refresh",Map.of(),b,UUID.randomUUID()),404);status(send("POST","/api/v1/auth/kakao",Map.of(),b,null),404);
 		status(send("POST","/api/v1/auth/guest",Map.of("installationId",UUID.randomUUID()),b,null),400);
 	}
-	@Test void oauthStoresConsentOnlyBeforeProviderCall()throws Exception{
-		Browser b=bootstrap();String state=start(b,"LOGIN",false);assertThat(count("oauthConsent")).isEqualTo(3);assertThat(count("appUser")).isZero();verifyNoInteractions(kakao);
-		var r=callback(b,state);status(r,303);assertThat(r.headers().firstValue("Location")).contains("/onboarding/profile");assertThat(count("appUser")).isEqualTo(1);assertThat(count("consentEvent")).isEqualTo(3);
+	@Test void oauthAuthenticatesWithoutConsentOrProfileWrites()throws Exception{
+		Browser b=bootstrap();String state=start(b,"LOGIN",false);assertThat(count("appUser")).isZero();verifyNoInteractions(kakao);
+		var r=callback(b,state);status(r,303);assertThat(r.headers().firstValue("Location")).contains("/onboarding/profile");cookie(b,r);
+		assertThat(count("appUser")).isEqualTo(1);assertThat(count("consentEvent")).isZero();
+		var user=authRepository.user(userId(b),false);assertThat(user.status()).isEqualTo("ACTIVE");
+		assertThat(user.nameCipher()).isNull();assertThat(user.phoneCipher()).isNull();assertThat(user.genderCipher()).isNull();assertThat(user.birthDateCipher()).isNull();
 		status(callback(b,state),303);verify(kakao,times(1)).exchange(anyString(),anyString());
 	}
-	@Test void oauthRejectsMissingDuplicateOrNonVersionOneConsent()throws Exception{Browser b=bootstrap();status(send("POST","/api/v1/auth/kakao/authorization",Map.of("purpose","LOGIN"),b,null),422);
-		var duplicate=List.of(decisions(false).getFirst(),decisions(false).getFirst(),decisions(false).getLast());code(send("POST","/api/v1/auth/kakao/authorization",Map.of("purpose","LOGIN","decisions",duplicate),b,null),422,"INVALID_CONSENT");
-		var wrongVersion=new ArrayList<>(decisions(false));wrongVersion.set(1,Map.of("code","AI_CALL","version",2,"action","GRANTED"));code(send("POST","/api/v1/auth/kakao/authorization",Map.of("purpose","LOGIN","decisions",wrongVersion),b,null),422,"INVALID_CONSENT");assertThat(count("oauthAttempt")).isZero();}
+
+	@Test void oauthAcceptsPurposeOnlyAndRejectsLegacyDecisions()throws Exception{
+		Browser b=bootstrap();var r=send("POST","/api/v1/auth/kakao/authorization",Map.of("purpose","LOGIN"),b,null);status(r,200);
+		assertThat(r.text("authorizationUrl")).doesNotContain("scope=");
+		status(send("POST","/api/v1/auth/kakao/authorization",Map.of("purpose","LOGIN","decisions",decisions(false)),b,null),400);
+		status(send("POST","/api/v1/auth/kakao/authorization",Map.of(),b,null),400);
+		assertThat(count("oauthAttempt")).isEqualTo(1);
+	}
+
 	@Test void oauthCallbackRequiresStartingCookieAndUnexpiredState()throws Exception{Browser b=bootstrap(),other=bootstrap();String state=start(b,"LOGIN",false);assertThat(callback(other,state).headers().firstValue("Location")).contains("/login?reason=oauth_failed");clock.advance(601);assertThat(callback(b,state).headers().firstValue("Location")).contains("/login?reason=oauth_failed");verifyNoInteractions(kakao);}
-	@Test void callbackConsentSnapshotIsCompleteBeforeCodeExchange()throws Exception{Browser b=bootstrap();String state=start(b,"LOGIN",false);jdbc.update("DELETE FROM `oauthConsent` WHERE `documentCode`='AI_CALL'");status(callback(b,state),303);verifyNoInteractions(kakao);assertThat(count("appUser")).isZero();}
-	@Test void explicitReauthPreservesStepAndMarksSensitiveSession()throws Exception{Browser b=member();String old=b.cookie;login(b,"REAUTH",false);assertThat(b.cookie).isNotEqualTo(old);assertThat(authRepository.byCookie(crypto.hash("WEB_SESSION",b.cookie)).sensitiveVerifiedAt()).isEqualTo(START);assertThat(send("GET","/api/v1/onboarding",null,b,null).text("step")).isEqualTo("PROFILE");}
+	@Test void freshLoginCanSaveConsentProfileAndContactsWithPartialRetry()throws Exception{
+		Browser b=bootstrap();login(b,"LOGIN",false);
+		var initial=send("GET","/api/v1/me/profile",null,b,null);status(initial,200);
+		assertThat(initial.body().path("name").isNull()).isTrue();assertThat(initial.body().path("version").asLong()).isEqualTo(1);
+		code(send("PATCH","/api/v1/me/profile",profile(1),b,UUID.randomUUID()),403,"CONSENT_REQUIRED");
+		code(send("POST","/api/v1/me/emergency-contacts",Map.of("name","보호자","relationship","가족","phone","01087654321"),b,UUID.randomUUID()),403,"CONSENT_REQUIRED");
+		grant(b,false);code(send("POST","/api/v1/calls",createBody(),b,UUID.randomUUID()),422,"PROFILE_REQUIRED");
+		UUID profileKey=UUID.randomUUID();status(send("PATCH","/api/v1/me/profile",profile(1),b,profileKey),200);
+		code(send("POST","/api/v1/me/emergency-contacts",Map.of("name","보호자","relationship","가족","phone","01012345678"),b,UUID.randomUUID()),409,"CONTACT_PHONE_CONFLICT");
+		status(send("PATCH","/api/v1/me/profile",profile(1),b,profileKey),200);guardian(b,"보호자","01087654321");
+		status(composer(b,"?mode=TEST"),200);assertThat(count("consentEvent")).isEqualTo(3);assertThat(count("emergencyContact")).isEqualTo(1);
+	}
+
+	@Test void explicitReauthPreservesDataAndMarksSensitiveSession()throws Exception{Browser b=member();String old=b.cookie;login(b,"REAUTH",false);assertThat(b.cookie).isNotEqualTo(old);assertThat(authRepository.byCookie(crypto.hash("WEB_SESSION",b.cookie)).sensitiveVerifiedAt()).isEqualTo(START);assertThat(send("GET","/api/v1/auth/session",null,b,null).body().has("onboardingStep")).isFalse();assertThat(count("consentEvent")).isEqualTo(3);}
 	@Test void reauthCannotSwitchAccountsOrAcceptDecisions()throws Exception{Browser b=member();status(send("POST","/api/v1/auth/kakao/authorization",Map.of("purpose","REAUTH","decisions",decisions(false)),b,null),400);String state=start(b,"REAUTH",false);when(kakao.exchange(anyString(),anyString())).thenReturn(new KakaoClient.KakaoIdentity("99999",null,null,null,null));code(callback(b,state),403,"REAUTH_ACCOUNT_MISMATCH");assertThat(count("appUser")).isEqualTo(1);}
 	@Test void logoutIsAtomicRepeatableAndOtherBrowserStaysValid()throws Exception{Browser b=member(),other=member();status(send("POST","/api/v1/auth/logout",Map.of(),b,null),204);status(send("POST","/api/v1/auth/logout",Map.of(),b,null),204);status(send("GET","/api/v1/me/profile",null,other,null),200);status(send("POST","/api/v1/auth/logout",Map.of(),null,null),204);}
 	@Test void logoutDatabaseFailureKeepsSession()throws Exception{Browser b=guest();doThrow(new org.springframework.dao.DataAccessResourceFailureException("synthetic")).when(authRepository).endSession(any(),any(),anyString(),anyString(),any());code(send("POST","/api/v1/auth/logout",Map.of(),b,null),503,"LOGOUT_FAILED");assertThat(authRepository.byCookie(crypto.hash("WEB_SESSION",b.cookie)).status()).isEqualTo("ACTIVE");}
-	@Test void onboardingUsesNoticesAndSkipsReservedConsentStep()throws Exception{Browser b=member();code(send("POST","/api/v1/onboarding/advance",Map.of("step","CONSENTS","expectedVersion",1),b,UUID.randomUUID()),422,"VALIDATION_FAILED");complete(b);assertThat(send("GET","/api/v1/onboarding",null,b,null).text("step")).isEqualTo("COMPLETE");}
-	@Test void profileRequiresPrivacyAndDemographicsRequireAi()throws Exception{Browser b=member();jdbc.update("DELETE FROM `consentEvent` WHERE `documentCode`='PRIVACY_PROCESSING'");code(send("GET","/api/v1/me/profile",null,b,null),403,"CONSENT_REQUIRED");}
+	@Test void onboardingRoutesAndSessionStepAreRemoved()throws Exception{
+		Browser b=member();status(send("GET","/api/v1/onboarding",null,b,null),404);
+		status(send("POST","/api/v1/onboarding/advance",Map.of("step","PROFILE","expectedVersion",1),b,UUID.randomUUID()),404);
+		assertThat(send("GET","/api/v1/auth/session",null,b,null).body().has("onboardingStep")).isFalse();
+		complete(b);create(b);
+	}
+
+	@Test void profileWithoutPrivacyReturnsEmptyFieldsButStillBlocksWrites()throws Exception{
+		Browser b=member();complete(b);jdbc.update("DELETE FROM `consentEvent` WHERE `documentCode`='PRIVACY_PROCESSING'");
+		var r=send("GET","/api/v1/me/profile",null,b,null);status(r,200);assertThat(r.body().path("name").isNull()).isTrue();assertThat(r.body().path("profileConfirmedAt").isNull()).isTrue();
+		code(send("PATCH","/api/v1/me/profile",profile(2),b,UUID.randomUUID()),403,"CONSENT_REQUIRED");
+	}
+
 	@Test void profilePatchNormalizesAndReplaysBeforeVersionCheck()throws Exception{Browser b=member();UUID key=UUID.randomUUID();var body=profile(1);var r=send("PATCH","/api/v1/me/profile",body,b,key);status(r,200);assertThat(r.text("phone")).isEqualTo("01012345678");assertThat(r.body().path("gender").isNull()).isTrue();assertThat(r.body().has("userId")).isFalse();assertThat(r.body().has("profileConfirmedAt")).isTrue();status(send("PATCH","/api/v1/me/profile",body,b,key),200);code(send("PATCH","/api/v1/me/profile",body,b,UUID.randomUUID()),409,"VERSION_CONFLICT");}
 	@Test void profileRejectsMissingNullableFieldsUnknownFieldsAndInvalidDate()throws Exception{Browser b=member();var body=profile(1);body.remove("gender");status(send("PATCH","/api/v1/me/profile",body,b,UUID.randomUUID()),400);body=profile(1);body.put("birthDate","2027-01-01");code(send("PATCH","/api/v1/me/profile",body,b,UUID.randomUUID()),422,"INVALID_BIRTH_DATE");body=profile(1);body.put("userId",UUID.randomUUID());status(send("PATCH","/api/v1/me/profile",body,b,UUID.randomUUID()),400);}
 	@Test void consentsUseCurrentVersionAndEffectiveFields()throws Exception{Browser b=member();var r=send("GET","/api/v1/me/consents",null,b,null);status(r,200);var item=r.body().path("items").get(0);assertThat(item.has("currentVersion")).isTrue();assertThat(item.has("isEffective")).isTrue();assertThat(item.has("isValid")).isFalse();}
@@ -669,7 +702,15 @@ class WebIntegrationTest {
 	@Test void sensitiveWithdrawalNeedsRecentExplicitReauthAndReturnsOnlyReceiptCookie()throws Exception{Browser b=member();code(send("POST","/api/v1/me/consents/PRIVACY_PROCESSING/withdrawal",Map.of(),b,UUID.randomUUID()),403,"REAUTHENTICATION_REQUIRED");login(b,"REAUTH",false);var r=send("POST","/api/v1/me/consents/PRIVACY_PROCESSING/withdrawal",Map.of(),b,UUID.randomUUID());status(r,202);assertThat(r.text("scope")).isEqualTo("ACCOUNT");assertThat(r.body().has("receiptToken")).isFalse();assertThat(r.headers().firstValue("Set-Cookie").orElseThrow()).contains("__Host-safecall-deletion=","HttpOnly");}
 	@Test void reauthExpiresAfterFiveMinutes()throws Exception{Browser b=member();login(b,"REAUTH",false);clock.advance(300);code(send("POST","/api/v1/me/consents/PRIVACY_PROCESSING/withdrawal",Map.of(),b,UUID.randomUUID()),403,"REAUTHENTICATION_REQUIRED");}
 	@Test void aiWithdrawalCleansDataAtomicallyAndRetainsContactAndIdentity()throws Exception{Browser b=member();complete(b);UUID call=create(b);worker.runOne(call);var r=send("POST","/api/v1/me/consents/AI_CALL/withdrawal",Map.of(),b,UUID.randomUUID());status(r,202);assertThat(send("GET","/api/v1/calls/"+call,null,b,null).text("endReason")).isEqualTo("CONSENT_WITHDRAWN");cleanup.run();assertThat(count("callSession")).isZero();var user=authRepository.user(userId(b),false);assertThat(user.genderCipher()).isNull();assertThat(user.nameCipher()).isNotNull();assertThat(jdbc.queryForObject("SELECT `status` FROM `deletionJob`",String.class)).isEqualTo("COMPLETED");}
-	@Test void oauthLocationDeclineUsesWithdrawalCleanup()throws Exception{Browser b=bootstrap();login(b,"LOGIN",true);login(b,"LOGIN",false);assertThat(jdbc.queryForObject("SELECT `action` FROM `consentEvent` WHERE `documentCode`='LOCATION_PROCESSING' ORDER BY `recordedAt` DESC LIMIT 1",String.class)).isEqualTo("WITHDRAWN");assertThat(jdbc.queryForObject("SELECT `scope` FROM `deletionJob`",String.class)).isEqualTo("LOCATION_DATA");}
+	@Test void ordinaryReloginPreservesConsentAndProfileWithoutAutoGrant()throws Exception{
+		Browser b=member();grant(b,true);complete(b);long events=count("consentEvent");long version=authRepository.user(userId(b),false).version();
+		login(b,"LOGIN",false);assertThat(count("consentEvent")).isEqualTo(events);assertThat(count("deletionJob")).isZero();
+		assertThat(authRepository.user(userId(b),false).version()).isEqualTo(version);
+		status(send("POST","/api/v1/me/consents/AI_CALL/withdrawal",Map.of(),b,UUID.randomUUID()),202);
+		login(b,"LOGIN",false);code(send("POST","/api/v1/calls",createBody(),b,UUID.randomUUID()),409,"DATA_CLEANUP_PENDING");
+		cleanup.run();code(send("POST","/api/v1/calls",createBody(),b,UUID.randomUUID()),403,"CONSENT_REQUIRED");
+	}
+
 	@Test void contactsEnforceSlotsDuplicatesAndTargetScopedIdempotency()throws Exception{Browser b=member();UUID key=UUID.randomUUID();List<String> ids=new ArrayList<>();for(String phone:List.of("01011112222","01033334444")){var r=send("POST","/api/v1/me/emergency-contacts",Map.of("name","보호자","relationship","가족","phone",phone),b,UUID.randomUUID());status(r,201);assertThat(r.headers().firstValue("Location")).isPresent();ids.add(r.text("id"));}for(String id:ids)status(send("DELETE","/api/v1/me/emergency-contacts/"+id,Map.of("expectedVersion",1),b,key),204);status(send("DELETE","/api/v1/me/emergency-contacts/"+ids.getFirst(),Map.of("expectedVersion",1),b,key),204);status(send("DELETE","/api/v1/me/emergency-contacts/"+ids.getFirst(),Map.of("expectedVersion",1),b,UUID.randomUUID()),404);assertThat(count("emergencyContact")).isZero();}
 	@Test void settingsRequireIdempotencyAndExcludeVibration()throws Exception{Browser b=member();UUID key=UUID.randomUUID();var body=Map.of("incomingAlertMode","SILENT","expectedVersion",1);status(send("PATCH","/api/v1/me/settings",body,b,key),200);status(send("PATCH","/api/v1/me/settings",body,b,key),200);status(send("PATCH","/api/v1/me/settings",body,b,null),400);status(send("PATCH","/api/v1/me/settings",Map.of("incomingAlertMode","VIBRATE","expectedVersion",2),b,UUID.randomUUID()),422);}
 	@Test void homeReflectsActiveCallAndCatalogVersion()throws Exception{Browser b=member();complete(b);status(send("POST","/api/v1/me/emergency-contacts",Map.of("name","보호자","relationship","가족","phone","01011112222"),b,UUID.randomUUID()),201);assertThat(send("GET","/api/v1/home",null,b,null).body().path("isMessageComposeEligible").asBoolean()).isTrue();create(b);assertThat(send("GET","/api/v1/home",null,b,null).body().path("messageBlockReasons").toString()).contains("CALL_ALREADY_OPEN");assertThat(send("GET","/api/v1/call-options",null,b,null).body().path("catalogVersion").asInt()).isEqualTo(3);}
@@ -689,7 +730,7 @@ class WebIntegrationTest {
 	@Test void concurrentSameCreateIsSingleCall()throws Exception{Browser b=guest();var body=createBody();UUID key=UUID.randomUUID();try(var executor=Executors.newFixedThreadPool(2)){var a=executor.submit(()->send("POST","/api/v1/calls",body,b,key));var c=executor.submit(()->send("POST","/api/v1/calls",body,b,key));status(a.get(),202);status(c.get(),202);}assertThat(count("callSession")).isEqualTo(1);}
 	@Test void concurrentContactCreatesEnforceTwoSlots()throws Exception{Browser b=member();try(var executor=Executors.newFixedThreadPool(3)){List<Future<Result>> results=new ArrayList<>();for(String phone:List.of("01011112222","01033334444","01055556666"))results.add(executor.submit(()->send("POST","/api/v1/me/emergency-contacts",Map.of("name","보호자","relationship","가족","phone",phone),b,UUID.randomUUID())));List<Integer> statuses=new ArrayList<>();for(var f:results)statuses.add(f.get().status());assertThat(statuses).containsExactlyInAnyOrder(201,201,409);}assertThat(count("emergencyContact")).isEqualTo(2);}
 	@Test void unknownJsonAndDuplicateKeysAreRejectedWithoutLeakingValues()throws Exception{Browser b=bootstrap();var r=raw("POST","/api/v1/auth/guest","{\"secret\":\"sensitive\",\"secret\":\"sensitive\"}",b,null,ORIGIN,b.csrf,null);status(r,400);assertThat(r.body().toString()).doesNotContain("sensitive");assertThat(r.text("timestamp")).endsWith("Z");}
-	@Test void openApiExposesOnlyImplementedWebOperations()throws Exception{var r=send("GET","/v3/api-docs",null,null,null);status(r,200);var paths=r.body().path("paths");assertThat(r.body().path("servers").path(0).path("url").asString()).isEqualTo("/");assertThat(paths.has("/api/v1/auth/refresh")).isFalse();assertThat(paths.has("/api/v1/documents/{code}")).isFalse();assertThat(paths.has("/api/v1/calls/{callId}/connection-renewals")).isTrue();assertThat(paths.path("/api/v1/me/profile").has("patch")).isTrue();assertThat(r.body().path("components").path("securitySchemes").path("webSession").path("in").asString()).isEqualTo("cookie");}
+	@Test void openApiExposesOnlyImplementedWebOperations()throws Exception{var r=send("GET","/v3/api-docs",null,null,null);status(r,200);var paths=r.body().path("paths");assertThat(r.body().path("servers").path(0).path("url").asString()).isEqualTo("/");assertThat(paths.has("/api/v1/auth/refresh")).isFalse();assertThat(paths.has("/api/v1/documents/{code}")).isFalse();assertThat(paths.has("/api/v1/onboarding")).isFalse();assertThat(paths.has("/api/v1/onboarding/advance")).isFalse();assertThat(r.body().path("components").path("schemas").path("AuthorizationRequest").path("properties").has("decisions")).isFalse();assertThat(paths.has("/api/v1/calls/{callId}/connection-renewals")).isTrue();assertThat(paths.path("/api/v1/me/profile").has("patch")).isTrue();assertThat(r.body().path("components").path("securitySchemes").path("webSession").path("in").asString()).isEqualTo("cookie");}
 
 	@Test void deletionViewIncludesAllSevenFieldsAndReplaysCurrentStatus()throws Exception{
 		Browser b=member();UUID key=UUID.randomUUID();var result=send("POST","/api/v1/me/consents/LOCATION_PROCESSING/withdrawal",Map.of(),b,key);status(result,202);
@@ -704,8 +745,11 @@ class WebIntegrationTest {
 	@Test void aiConsentIsRequiredForNewDemographicsEvenWithoutPriorWithdrawal()throws Exception{
 		Browser b=member();jdbc.update("DELETE FROM `consentEvent` WHERE `documentCode`='AI_CALL'");var body=profile(1);body.put("gender","FEMALE");code(send("PATCH","/api/v1/me/profile",body,b,UUID.randomUUID()),403,"CONSENT_REQUIRED");
 	}
-	@Test void requiredConsentDeclineCannotStartOAuth()throws Exception{
-		Browser b=bootstrap();var choices=new ArrayList<>(decisions(false));choices.set(0,Map.of("code","PRIVACY_PROCESSING","version",1,"action","DECLINED"));code(send("POST","/api/v1/auth/kakao/authorization",Map.of("purpose","LOGIN","decisions",choices),b,null),403,"CONSENT_REQUIRED");assertThat(count("oauthAttempt")).isZero();
+	@Test void declinedPrivacyAllowsLoginButBlocksPersonalDataAndCalls()throws Exception{
+		Browser b=bootstrap();login(b,"LOGIN",false);var choices=new ArrayList<>(decisions(false));choices.set(0,Map.of("code","PRIVACY_PROCESSING","version",1,"action","DECLINED"));
+		status(send("POST","/api/v1/me/consents",Map.of("decisions",choices),b,UUID.randomUUID()),200);
+		code(send("PATCH","/api/v1/me/profile",profile(1),b,UUID.randomUUID()),403,"CONSENT_REQUIRED");
+		code(send("POST","/api/v1/calls",createBody(),b,UUID.randomUUID()),403,"CONSENT_REQUIRED");
 	}
 	@Test void reauthAuthorizationRequiresPromptLoginAndNoProfileScopes()throws Exception{
 		Browser b=member();var r=send("POST","/api/v1/auth/kakao/authorization",Map.of("purpose","REAUTH"),b,null);status(r,200);assertThat(r.text("authorizationUrl")).contains("prompt=login").doesNotContain("scope=");
@@ -759,10 +803,12 @@ class WebIntegrationTest {
 		finally{jdbc.execute("DROP TRIGGER `synthetic_account_failure`");}
 		accountsCleanup.run();assertThat(count("appUser")).isZero();
 	}
-	@Test void abandonedOnboardingQueuesAccountDeletionAfter24Hours()throws Exception{
-		member();clock.advance(86399);accountsCleanup.run();assertThat(count("deletionJob")).isZero();clock.advance(1);accountsCleanup.run();
-		assertThat(jdbc.queryForObject("SELECT `status` FROM `appUser`",String.class)).isEqualTo("DELETION_PENDING");clock.advance(60);accountsCleanup.run();assertThat(count("appUser")).isZero();
+	@Test void accountWithoutCompletedProfileIsNotDeletedAfter24Hours()throws Exception{
+		Browser b=bootstrap();login(b,"LOGIN",false);clock.advance(86401);accountsCleanup.run();
+		assertThat(count("deletionJob")).isZero();assertThat(count("appUser")).isEqualTo(1);
+		assertThat(jdbc.queryForObject("SELECT `status` FROM `appUser`",String.class)).isEqualTo("ACTIVE");
 	}
+
 	@Test void retentionRemovesExpiredGuestCallsAndKeysButKeepsActiveMember()throws Exception{
 		Browser member=member();complete(member);Browser guest=guest();UUID call=create(guest);worker.runOne(call);
 		String ref=jdbc.queryForObject("SELECT `keyRef` FROM `connectionGrant` WHERE `callId`=?",String.class,bin(call));
@@ -781,9 +827,9 @@ class WebIntegrationTest {
 		Browser b=guest();UUID call=create(b);String grant=active(b,call);UUID key=UUID.randomUUID();status(renew(b,call,grant,key),202);end(b,call);code(renew(b,call,grant,key),409,"CALL_TERMINAL");
 	}
 	@Test void finalSchemaHasExpectedTablesColumnsAndConstraints(){
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(19);
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(188);
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(165);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(18);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(181);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(155);
 	}
 	@Test void aiWithdrawalMasksDemographicsBeforeWorkerAndDoesNotBlockLocationConsent()throws Exception{
 		Browser b=member();status(send("POST","/api/v1/me/consents/AI_CALL/withdrawal",Map.of(),b,UUID.randomUUID()),202);
@@ -857,18 +903,14 @@ class WebIntegrationTest {
 		jdbc.update("DELETE FROM `emergencyContact` WHERE `userId`=?",bin(userId(b)));
 		code(composer(b,""),409,"CONTACT_REQUIRED");
 	}
-	@Test void composerTestModeAllowsOnlyMessageTestAndCompleteSteps() throws Exception {
-		Browser b=member(); guardian(b,"보호자","01087654321");
+	@Test void composerUsesProfileAndConsentInsteadOfScreenSteps()throws Exception{
+		Browser b=member();guardian(b,"보호자","01087654321");code(composer(b,"?mode=TEST"),409,"PROFILE_REQUIRED");
 		status(send("PATCH","/api/v1/me/profile",profile(1),b,UUID.randomUUID()),200);
-		for (String step:List.of("PROFILE","CONTACTS","PERMISSIONS","SOS_GUIDE")) {
-			code(composer(b,"?mode=TEST"),403,"ONBOARDING_REQUIRED"); advance(b,step);
-		}
-		code(composer(b,""),403,"ONBOARDING_REQUIRED");
-		var result=composer(b,"?mode=TEST"); status(result,200);
+		var result=composer(b,"?mode=TEST");status(result,200);
 		assertThat(result.text("baseBody")).isEqualTo("[테스트] 홍길동(010-xxxx-5678)의 SafeCall 안심 메시지입니다.");
-		assertThat(result.text("mode")).isEqualTo("TEST");
-		advance(b,"MESSAGE_TEST"); status(composer(b,"?mode=TEST"),200); status(composer(b,"?mode=SAFETY"),200);
+		status(composer(b,"?mode=SAFETY"),200);
 	}
+
 	@Test void composerRejectsMissingGuestAnonymousExpiredAndLoggedOutSessions() throws Exception {
 		code(composer(null,""),401,"SESSION_EXPIRED");
 		code(composer(bootstrap(),""),403,"LOGIN_REQUIRED"); code(composer(guest(),""),403,"LOGIN_REQUIRED");
@@ -911,7 +953,6 @@ class WebIntegrationTest {
 	}
 	@Test void composerBlocksOpenCallOnlyInCurrentSessionAndAllowsEndedCall() throws Exception {
 		Browser b=composerMember(); Browser other=member();
-		jdbc.update("UPDATE `webSession` SET `onboardingStep`='COMPLETE' WHERE `id`=?",bin(sessionId(other)));
 		UUID call=create(b); code(composer(b,""),409,"CALL_ALREADY_OPEN"); code(composer(b,"?mode=TEST"),409,"CALL_ALREADY_OPEN");
 		status(composer(other,""),200); status(end(b,call),200); status(composer(b,""),200);
 	}
@@ -994,7 +1035,7 @@ class WebIntegrationTest {
 		assertThat(result.text("baseBody")).doesNotContain("https://");
 	}
 	Result history(Browser b,String query)throws Exception{return send("GET","/api/v1/me/usage-history"+query,null,b,null);}
-	Browser returningMember()throws Exception{Browser b=member();for(String step:List.of("PROFILE","PERMISSIONS","SOS_GUIDE","MESSAGE_TEST"))advance(b,step);return b;}
+	Browser returningMember()throws Exception{Browser b=member();complete(b);return b;}
 	Result deletion(Browser b,String scope,UUID key)throws Exception{return send("POST","/api/v1/me/data-deletions",Map.of("scope",scope,"isConfirmed",true),b,key);}
 	String receipt(Result r){String value=r.headers().firstValue("Set-Cookie").orElseThrow();return value.substring(value.indexOf('=')+1,value.indexOf(';'));}
 	Result deletionStatus(String id,Browser b,String receipt)throws Exception{
@@ -1211,12 +1252,17 @@ class WebIntegrationTest {
 		var row=jdbc.queryForMap("SELECT * FROM `deletionJob` WHERE `id`=?",bin(id));for(String field:List.of("cleanupCipher","cleanupKeyRef","accountSubjectHash"))assertThat(row.get(field)).isNull();
 		discardQueue.run();assertThatThrownBy(()->userKeys.read(cleanupRef)).isInstanceOf(RuntimeException.class);member();assertThat(count("appUser")).isEqualTo(1);
 	}
-	@Test void accountRollbackPreservesActiveStatusEvenWhenCompletedSessionsWerePurged()throws Exception{
+	@org.junit.jupiter.params.ParameterizedTest
+	@org.junit.jupiter.params.provider.ValueSource(strings={"ACTIVE","ONBOARDING"})
+	void accountRollbackPreservesActiveStatusEvenWhenCompletedSessionsWerePurged(String previousStatus)throws Exception{
 		Browser old=member();complete(old);UUID previousSession=sessionId(old);Browser b=member();UUID user=userId(b);
 		jdbc.update("DELETE FROM `webSession` WHERE `id`=?",bin(previousSession));login(b,"REAUTH",false);
-		assertThat(authRepository.session(sessionId(b)).step().name()).isEqualTo("PROFILE");
+		assertThat(authRepository.user(user,false).status()).isEqualTo("ACTIVE");
 		var job=deletion(b,"ACCOUNT",UUID.randomUUID());status(job,202);UUID id=UUID.fromString(job.text("id"));
 		String recoveryRef=jdbc.queryForObject("SELECT `cleanupKeyRef` FROM `deletionJob` WHERE `id`=?",String.class,bin(id));clock.advance(60);
+		// Cover encrypted rollback state retained in deletion jobs created by the old server.
+		jdbc.update("UPDATE `deletionJob` SET `cleanupCipher`=? WHERE `id`=?",
+			crypto.seal(userKeys.read(recoveryRef),"DELETION_ROLLBACK:"+id,previousStatus.getBytes(java.nio.charset.StandardCharsets.UTF_8)),bin(id));
 		jdbc.execute("CREATE TRIGGER `synthetic_state_failure` BEFORE UPDATE ON `deletionJob` FOR EACH ROW BEGIN IF NEW.status='LOCAL_DELETED' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic failure'; END IF; END");
 		try{accountsCleanup.run();assertThat(authRepository.user(user,false).status()).isEqualTo("ACTIVE");assertThat(deletionStatus(job.text("id"),b,null).text("status")).isEqualTo("FAILED");
 			discardQueue.run();assertThatThrownBy(()->userKeys.read(recoveryRef)).isInstanceOf(RuntimeException.class);}

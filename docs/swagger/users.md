@@ -6,7 +6,7 @@
 
 1. U01 `GET /me/profile`에서 현재 값과 version을 읽는다.
 2. U02 `PATCH /me/profile`에 아래 **6개 필드 전부**와 현재 CSRF·새 Idempotency-Key를 보낸다. 예시 값은 테스트용이며 version은 U01 값으로 바꾼다.
-3. 200 응답과 U01 재조회에서 확인 값·version을 확인한다. 온보딩 중이면 [PROFILE 단계](auth.md)로 돌아간다.
+3. 200 응답과 U01 재조회에서 확인 값·version을 확인한다. 화면 전환은 프론트 캐시로 처리한다.
 
 ```json
 {"name":"홍길동","gender":null,"birthDate":null,"phone":"01012345678","isConfirmed":true,"expectedVersion":1}
@@ -44,7 +44,7 @@ U05는 GRANTED/DECLINED만 받는다. 기존 GRANTED를 DECLINED로 바꾸는 �
 
 ## 홈 H01/H02
 
-온보딩 완료 후 H01 `GET /home`, H02 `GET /call-options`를 조회한다.
+프로필·동의·연락처 저장 후 H01 `GET /home`, H02 `GET /call-options`를 조회한다.
 
 | 시나리오 | 기대 결과 |
 |---|---|

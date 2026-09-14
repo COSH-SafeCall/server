@@ -8,7 +8,7 @@
 
 | 영역 | 주요 코드 | 역할 |
 |---|---|---|
-| 인증 | [OAuthService](../src/main/java/com/safecall/service/auth/service/OAuthService.java), [AuthTransactions](../src/main/java/com/safecall/service/auth/service/AuthTransactions.java) | 세션 쿠키, OAuth code 교환, LOGIN/REAUTH, 온보딩 |
+| 인증 | [OAuthService](../src/main/java/com/safecall/service/auth/service/OAuthService.java), [AuthTransactions](../src/main/java/com/safecall/service/auth/service/AuthTransactions.java) | 세션 쿠키, OAuth code 교환, LOGIN/REAUTH. 화면 단계는 프론트 관리 |
 | 사용자 | [UserTransactions](../src/main/java/com/safecall/service/user/service/UserTransactions.java) | 프로필·동의·연락망·설정과 version 검사 |
 | 홈 | [HomeService](../src/main/java/com/safecall/service/home/service/HomeService.java) | 기능 자격과 통화 선택지 |
 | 통화 | [CallService](../src/main/java/com/safecall/service/call/service/CallService.java), [CallWorker](../src/main/java/com/safecall/service/call/service/CallWorker.java) | 생성·상태 전이·발급·만료·재개 |
@@ -66,7 +66,6 @@ Swagger 그룹과 API 표시 순서는 [OpenApiDisplayOrder](../src/main/java/co
 | A02 | POST `/auth/kakao/authorization`, GET `/auth/kakao/callback` |
 | A04 | POST `/auth/logout` |
 | A05 | GET `/auth/session` |
-| A06 / A07 | GET `/onboarding`, POST `/onboarding/advance` |
 | U01 / U02 | GET / PATCH `/me/profile` |
 | U04 / U05 | GET / POST `/me/consents` |
 | U06 | POST `/me/consents/{code}/withdrawal` |

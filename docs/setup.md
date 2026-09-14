@@ -37,7 +37,7 @@
 | KAKAO_CLIENT_SECRET | 앱에서 활성화한 client secret / 미사용 시 생략 가능 |
 | KAKAO_ADMIN_KEY | ACCOUNT 로컬 삭제 후 연결 해제용 서버 전용 Service app admin key. 미설정 시 LOCAL_DELETED에서 재시도 |
 | KAKAO_REDIRECT_URI | 정확히 `WEB_ORIGIN` + `/api/v1/auth/kakao/callback` |
-| KAKAO_LOGIN_SCOPES | 앱 승인 범위에 맞춘 항목 / `name,gender,birthday,birthyear,phone_number` |
+| KAKAO_LOGIN_SCOPES | 기본 빈 값. 서비스 프로필은 로그인 후 U02에서 입력 |
 | AUTH_REQUESTS_PER_MINUTE | 인증 시작 IP별 분당 제한 / `10` |
 | AUTH_CLEANUP_DELAY_MS | 인증·삭제·보존 정리 주기(ms) / `1000` |
 

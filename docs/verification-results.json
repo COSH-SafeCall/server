@@ -1,62 +1,70 @@
 {
   "schema_matches_final": true,
-  "schema_sha256": "b693349227c10471abc8b4a5374ede643d3dc4830fd98ac14385e0196f6083c3",
+  "schema_sha256": "2b71b00bb55594520378971c923903b77a27b9f4c980f0ff4fc1f69774761a96",
   "tasks": {
     "test": {
-      "tests": 62,
+      "tests": 60,
       "failures": 0,
       "errors": 0,
       "skipped": 0,
-      "latest_suite_timestamp": "2026-09-14T16:47:55.208Z"
+      "latest_suite_timestamp": "2026-09-14T19:31:37.188Z"
     },
     "integrationTest": {
-      "tests": 152,
+      "tests": 153,
       "failures": 0,
       "errors": 0,
       "skipped": 0,
-      "latest_suite_timestamp": "2026-09-14T16:48:09.857Z"
+      "latest_suite_timestamp": "2026-09-14T19:31:48.047Z"
     }
   },
-  "tested_worktree_base": "e93cf4cd6638b44f5c69ff12cdafbcdbb6b4e88f",
+  "tested_worktree_base": "d3a667870553f7c380f01bf8f047b63398395ec8",
   "schema_counts": {
-    "tables": 19,
-    "columns": 188,
-    "constraints": 165
+    "tables": 18,
+    "columns": 181,
+    "constraints": 155
   },
-  "schema_path": "current db/schema-mysql.sql on disposable MySQL",
+  "schema_path": "previous develop static-document schema plus client-onboarding migration on disposable MySQL",
   "migration_path_rerun_this_revision": true,
   "external_providers": "mocked",
   "regressions": [
-    "blockedAccountCleanupDoesNotDelayCallIssuanceOrExpiry",
-    "blockedKeyDisposalDoesNotBlockExpiryCommitOrNewCall"
+    "oauthAuthenticatesWithoutConsentOrProfileWrites",
+    "freshLoginCanSaveConsentProfileAndContactsWithPartialRetry",
+    "ordinaryReloginPreservesConsentAndProfileWithoutAutoGrant",
+    "onboardingRoutesAndSessionStepAreRemoved",
+    "accountWithoutCompletedProfileIsNotDeletedAfter24Hours",
+    "accountRollbackPreservesActiveStatusEvenWhenCompletedSessionsWerePurged"
   ],
   "migration_verification": {
-    "scope": "Existing develop DDL plus static service document migration on isolated MySQL",
-    "tested_worktree_base": "e93cf4cd6638b44f5c69ff12cdafbcdbb6b4e88f",
-    "schema_path": "develop db/schema-mysql.sql plus 20260915-static-service-documents.sql",
-    "checks": [
-      "migration executes successfully",
-      "serviceDocument table is absent",
-      "oauthConsent and consentEvent each enforce documentVersion=1"
-    ],
+    "scope": "Existing static-document DDL migrated, preservation checks then full HTTP integration suite on isolated MySQL",
+    "tested_worktree_base": "d3a667870553f7c380f01bf8f047b63398395ec8",
+    "previous_schema_sha256": "b693349227c10471abc8b4a5374ede643d3dc4830fd98ac14385e0196f6083c3",
     "migrations": [
-      "20260913-key-discard-job.sql",
-      "20260914-call-prompt-anchor.sql",
-      "20260914-grant-issuing-start.sql",
-      "20260914-account-external-retry.sql",
-      "20260915-static-service-documents.sql"
+      "20260915-client-onboarding.sql"
+    ],
+    "checks": [
+      "profile/contact/consent/deletion jobs preserved",
+      "ONBOARDING accounts mapped to ACTIVE without automatic consent or profile confirmation",
+      "DELETION_PENDING accounts preserved",
+      "pending OAuth expired, sessions preserved",
+      "oauthConsent and webSession onboardingStep/version removed",
+      "new account default ACTIVE",
+      "full integration suite including encrypted legacy deletion rollback state passed"
     ]
   },
   "swagger_display_verification": {
-    "operations": 32,
-    "groups": 11,
+    "operations": 30,
+    "groups": 10,
     "method": "Actual test-server OpenAPI checked by integration test; design routes checked by verification script",
     "browser_render_checked": false,
     "checks": [
-      "U03 path absent",
-      "32 unique design operations",
-      "required renewal path present",
-      "location and refresh routes absent"
+      "U03, A06, A07 paths absent",
+      "A02 decisions field absent and legacy request rejected",
+      "30 unique design operations",
+      "required renewal path present"
     ]
+  },
+  "design_verification": {
+    "passed": 75,
+    "mysql_version": "8.0.41"
   }
 }

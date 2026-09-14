@@ -61,7 +61,7 @@ app:
       client-secret: ${KAKAO_CLIENT_SECRET:}
       admin-key: ${KAKAO_ADMIN_KEY:}
       redirect-uri: ${KAKAO_REDIRECT_URI:https://api.dev-safecall.r-e.kr/api/v1/auth/kakao/callback}
-      login-scopes: ${KAKAO_LOGIN_SCOPES:name,gender,birthday,birthyear,phone_number}
+      login-scopes: ${KAKAO_LOGIN_SCOPES:}
   auth:
     requests-per-minute: ${AUTH_REQUESTS_PER_MINUTE:10}
     cleanup-delay-ms: ${AUTH_CLEANUP_DELAY_MS:1000}

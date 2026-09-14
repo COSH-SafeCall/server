@@ -25,7 +25,7 @@ public class OpenApiConfiguration {
 		}
 		if(!Set.of("A05","A02_CALLBACK").contains(id))operation.setSecurity(List.of(new SecurityRequirement().addList("webSession")));
 		if(id.equals("R03"))operation.setSecurity(List.of(new SecurityRequirement().addList("webSession"),new SecurityRequirement().addList("deletionReceipt")));
-		if(!Set.of("A05","A02_CALLBACK","A06","U01","U04","U07","U11","H01","H02","C02","C03","M01","R01","R03").contains(id)) {
+		if(!Set.of("A05","A02_CALLBACK","U01","U04","U07","U11","H01","H02","C02","C03","M01","R01","R03").contains(id)) {
 			operation.addParametersItem(new Parameter().in("header").name("X-CSRF-Token").required(true).schema(new StringSchema()).description("A05에서 받은 현재 세션의 CSRF 토큰"));
 			operation.addParametersItem(new Parameter().in("header").name("Origin").required(true).schema(new StringSchema()).description("WEB_ORIGIN과 같은 origin; 브라우저가 설정"));
 		}

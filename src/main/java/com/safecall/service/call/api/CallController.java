@@ -21,7 +21,7 @@ public class CallController {
 	private final CallService service;
 	public CallController(CallService service) { this.service=service; }
 	@PostMapping(consumes="application/json")
-	@Operation(operationId="C01",summary="C01 · AI 통화 생성",description="완료된 게스트/회원 세션. 마이크 권한, 회원 필수 동의, 발행된 12개 프롬프트가 필요합니다. 생성 후 heartbeat를 5초 간격으로 전송합니다.")
+	@Operation(operationId="C01",summary="C01 · AI 통화 생성",description="게스트/회원 세션. 마이크 권한, 회원의 확인된 프로필과 필수 동의, 발행된 12개 프롬프트가 필요합니다. 생성 후 heartbeat를 5초 간격으로 전송합니다.")
 	@ApiResponse(responseCode="202",description="통화 준비 중",content=@Content(schema=@Schema(implementation=CallView.class)))
 	public ResponseEntity<CallView> create(@Parameter(hidden=true) @CookieValue(value="__Host-safecall-session",required=false) String access,
 		@RequestHeader("Idempotency-Key") UUID key,@RequestHeader("X-Call-Page-Key") String page,@Valid @RequestBody CreateCall body, jakarta.servlet.http.HttpServletRequest request) {

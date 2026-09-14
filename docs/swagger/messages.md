@@ -6,9 +6,8 @@
 
 | 순서 | 호출·동작 | 기대 결과 |
 |---|---|---|
-| 1 | MESSAGE_TEST 단계에서 GET `/message-composer?mode=TEST` | 200, 테스트 본문 |
-| 2 | 같은 단계에서 `mode=SAFETY` | 403 ONBOARDING_REQUIRED |
-| 3 | A07로 COMPLETE 이후 SAFETY 조회 | 200, 일반 본문 |
+| 1 | GET `/message-composer?mode=TEST` | 200, 테스트 본문 |
+| 2 | 같은 데이터로 `mode=SAFETY` | 200, 일반 본문 |
 | 4 | U02/U09 수정 후 다시 조회 | 최신 이름·번호·version 반영 |
 | 5 | 현재 브라우저에 통화를 만들고 조회 | 409 CALL_ALREADY_OPEN. 종료 후 다시 200 |
 
@@ -34,7 +33,6 @@ GET 요청이라 CSRF·멱등 키·본문은 필요 없다. mode 생략은 SAFET
 | 세션 없음·만료·로그아웃 | 401 SESSION_EXPIRED |
 | 익명·게스트 | 403 LOGIN_REQUIRED |
 | 개인정보 동의 없음 | 403 CONSENT_REQUIRED |
-| SAFETY에서 COMPLETE 이전 / TEST에서 MESSAGE_TEST·COMPLETE 이외 | 403 ONBOARDING_REQUIRED |
 | 프로필 미확인·이름/번호 없음 | 409 PROFILE_REQUIRED |
 | 보호자 없음 | 409 CONTACT_REQUIRED |
 | ACCOUNT·AI_DATA·LOCATION_DATA 정리 중 | 409 DATA_CLEANUP_PENDING; ACCOUNT는 세션 단계에서 먼저 차단될 수 있음 |

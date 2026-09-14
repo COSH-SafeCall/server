@@ -25,3 +25,5 @@ SafeCall 웹 MVP API 1~7장. 현재 실행·구조·검증에 필요한 문서�
 - DB 기준은 [논리 설계](../../design/DB_논리_설계_최종.md)와 [물리 설계](../../design/DB_물리_설계_최종.sql)다.
 - 설정 설명은 setup, 내부 처리 설명은 architecture, 요청 순서는 swagger, 실행 증거는 verification에서 관리한다.
 - 과거 수정 경위와 커밋·PR 문안은 Git 이력을 이용한다. 문서 수정만으로 테스트 실행 시각을 갱신하지 않는다.
+
+- [로그인 이후 온보딩 연동](frontend-onboarding.md): 캐시 초기화, 동의→프로필→연락처 저장 및 부분 실패 처리.

@@ -45,7 +45,12 @@ public class UserTransactions {
 	private void version(long current, long expected) {
 		if (current!=expected) throw new CustomException(ErrorCode.VERSION_CONFLICT);
 	}
-	public ProfileView profile(String access) { return profile(user(member(access))); }
+	public ProfileView profile(String access) {
+		Session session=authentication.member(access,false); User user=user(session);
+		if(!valid(user.id(),"PRIVACY_PROCESSING"))
+			return new ProfileView(null,null,null,null,"UNKNOWN","UNKNOWN",List.of("name","phone"),null,user.version());
+		return profile(user);
+	}
 	private ProfileView profile(User user) {
 		byte[] key=keys.read(user.keyRef());
 		boolean aiAllowed=valid(user.id(),"AI_CALL");

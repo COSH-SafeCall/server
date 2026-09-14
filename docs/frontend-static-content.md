@@ -4,12 +4,12 @@
 
 서버와 주고받는 동의 계약은 아래 세 코드뿐이며 버전은 모두 `1`이다.
 
-| code | 필수 | A02 LOGIN action |
+| code | 필수 | 온보딩 진행 시 선택 |
 |---|---|---|
 | PRIVACY_PROCESSING | 필수 | GRANTED |
 | AI_CALL | 필수 | GRANTED |
 | LOCATION_PROCESSING | 선택 | GRANTED 또는 DECLINED |
 
-A02 LOGIN은 세 결정을 정확히 한 번씩 받아야 한다. U05는 1~3개의 결정을 받고, U04는 세 코드의 이력과 항상 `currentVersion: 1`을 반환한다. 서버는 다른 코드 또는 version을 422 INVALID_CONSENT로 거절한다. U06은 세 코드 중 하나를 철회한다.
+A02는 purpose만 받는다. 동의는 로그인 후 개인정보 화면에서 U05로 저장한다. U05는 1~3개의 결정을 받고, U04는 세 코드의 이력과 항상 `currentVersion: 1`을 반환한다. 서버는 다른 코드 또는 version을 422 INVALID_CONSENT로 거절한다. U06은 세 코드 중 하나를 철회한다.
 
 `GET /api/v1/documents/{code}`(U03)는 제거됐다. 프론트엔드는 이 경로를 호출하지 않는다. 정적 문구를 바꿔도 서버 version을 올리지 않으므로, 사용자에게 이미 받은 동의의 의미가 달라지는 변경은 별도의 정책·재동의 설계 없이 배포하면 안 된다.
