@@ -28,7 +28,9 @@ public class AuthTransactions {
 	public SessionResult issue(UUID user,String kind,Step step,Instant verified,Instant expiry) {
 		Instant now=now(); UUID id=UUID.randomUUID(); String cookie=crypto.randomToken();
 		repository.createSession(id,user,kind,step,crypto.hash("WEB_SESSION",cookie),crypto.hash("CSRF",crypto.csrf(id)),now,expiry,verified);
-		return new SessionResult(view(repository.session(id)),cookie);
+		Session session=repository.session(id);
+		if(Set.of("KAKAO","GUEST").contains(kind))repository.observe(session,"AUTH","AUTH_SUCCEEDED",true,now);
+		return new SessionResult(view(session),cookie);
 	}
 	public SessionResult bootstrap(String cookie) {
 		Session s=lookup(cookie);

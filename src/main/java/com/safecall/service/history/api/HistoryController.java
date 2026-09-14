@@ -23,7 +23,7 @@ public class HistoryController {
 	private final Clock clock;
 	public HistoryController(HistoryService service,Clock clock) { this.service=service;this.clock=clock; }
 	@GetMapping("/me/usage-history")
-	@Operation(operationId="R01",summary="R01 · 종료·실패 통화 이용 기록 조회",tags="9. 이용 기록·데이터 삭제")
+	@Operation(operationId="R01",summary="R01 · 종료·실패 통화 이용 기록 조회")
 	@Parameter(name="limit",in=ParameterIn.QUERY,schema=@Schema(type="integer",minimum="1",maximum="100",defaultValue="20"))
 	@Parameter(name="cursor",in=ParameterIn.QUERY,schema=@Schema(type="string",minLength=16,maxLength=512,pattern="^[A-Za-z0-9_-]+$"))
 	public UsageHistoryView history(HttpServletRequest request) {
@@ -41,7 +41,7 @@ public class HistoryController {
 		return service.history(WebCookies.read(request),limit,cursors==null?null:cursors[0]);
 	}
 	@PostMapping(value="/me/data-deletions",consumes="application/json")
-	@Operation(operationId="R02",summary="R02 · 계정 또는 이용 기록 삭제 접수",tags="9. 이용 기록·데이터 삭제",
+	@Operation(operationId="R02",summary="R02 · 계정 또는 이용 기록 삭제 접수",
 		description="삭제 범위와 복구 불가능 항목을 안내한 뒤 isConfirmed=true로 접수합니다. ACCOUNT는 동일 계정의 최근 5분 이내 명시적 재인증이 필요합니다. 접수증은 HttpOnly 쿠키로만 발급합니다.")
 	public ResponseEntity<DeletionView> delete(HttpServletRequest request,@Valid @RequestBody DeletionRequest body,
 		@RequestHeader("Idempotency-Key") UUID key) {
@@ -50,7 +50,7 @@ public class HistoryController {
 			Math.max(0,Duration.between(clock.instant(),result.receiptExpiresAt()).getSeconds()))).body(result.view());
 	}
 	@GetMapping("/data-deletions/{jobId}")
-	@Operation(operationId="R03",summary="R03 · 삭제 작업 상태 조회",tags="9. 이용 기록·데이터 삭제",
+	@Operation(operationId="R03",summary="R03 · 삭제 작업 상태 조회",
 		description="소유 회원 또는 삭제 접수증 쿠키로 조회합니다. 탈퇴 후 접수증을 잃거나 만료되면 재인증으로 복구할 수 없습니다.")
 	public DeletionView status(HttpServletRequest request,@PathVariable UUID jobId) {
 		String receipt=null;

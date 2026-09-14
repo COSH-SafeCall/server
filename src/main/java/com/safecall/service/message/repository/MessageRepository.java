@@ -42,7 +42,7 @@ public class MessageRepository {
 					AND d.`version`=(SELECT e.`documentVersion` FROM `consentEvent` e WHERE e.`userId`=u.`id` AND e.`documentCode`=d.`code`
 						ORDER BY e.`recordedAt` DESC,e.`id` DESC LIMIT 1)) AS `isLocationGranted`,
 				(u.`status`='DELETION_PENDING' OR EXISTS(SELECT 1 FROM `deletionJob` j
-					WHERE j.`userId`=u.`id` AND j.`pendingMarker`=1)) AS `isCleanupPending`,
+					WHERE j.`userId`=u.`id` AND j.`pendingMarker`=1 AND j.`scope` IN ('ACCOUNT','AI_DATA','LOCATION_DATA'))) AS `isCleanupPending`,
 				EXISTS(SELECT 1 FROM `callSession` c WHERE c.`sessionId`=s.`id` AND c.`activeMarker`=1) AS `isCallOpen`,
 				r.`id` AS `contactId`, r.`slot`, r.`nameCipher` AS `contactName`,
 				r.`relationshipCipher` AS `contactRelationship`, r.`phoneCipher` AS `contactPhone`, r.`version`

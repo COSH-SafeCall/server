@@ -25,7 +25,7 @@ public class MessageController {
 	public MessageController(MessageService service) { this.service = service; }
 
 	@GetMapping(value="/api/v1/message-composer", produces="application/json")
-	@Operation(operationId="M01", summary="M01 · 안심 메시지 작성 자료 조회 및 자격 재검증", tags="8. 안심 메시지",
+	@Operation(operationId="M01", summary="M01 · 안심 메시지 작성 자료 조회 및 자격 재검증",
 		description="회원 전용. SAFETY는 COMPLETE, TEST는 MESSAGE_TEST 또는 COMPLETE 단계에서 조회합니다. "
 			+ "최신 보호자와 본인 번호를 마스킹한 작성 자료만 반환하며, 응답은 캐시하지 않습니다. 실제 SMS를 발송하지 않습니다.")
 	@Parameter(name="mode", in=ParameterIn.QUERY, description="생략하면 SAFETY. 빈 값과 중복 값은 허용하지 않습니다.",

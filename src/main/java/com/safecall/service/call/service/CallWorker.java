@@ -20,10 +20,16 @@ public class CallWorker {
 	public CallWorker(CallService service,CallRepository repository,GeminiClient gemini,Clock clock) {
 		this.service=service; this.repository=repository; this.gemini=gemini; this.clock=clock;
 	}
-	@Scheduled(fixedDelayString="${app.call.worker-delay-ms}",initialDelayString="${app.call.worker-delay-ms}")
+	@Scheduled(scheduler="callScheduler",fixedDelayString="${app.call.worker-delay-ms}",initialDelayString="${app.call.worker-delay-ms}")
 	public void tick() {
 		try {
-			for(UUID id:repository.expired(clock.instant()))service.reap(id);
+			for(UUID id:repository.expired(clock.instant())) {
+				try { service.reap(id); }
+				catch(RuntimeException exception) { failure(); }
+			}
+		} catch(RuntimeException exception) { failure(); }
+		// New issuance can proceed even when expiry lookup or an individual reaper fails.
+		try {
 			for(UUID id:repository.pending()) {
 				try { executor.execute(()->runOne(id)); }
 				catch(RejectedExecutionException busy) { break; }
@@ -41,7 +47,7 @@ public class CallWorker {
 			service.finish(id,request,token,null);
 		} catch(RuntimeException exception) {
 			// Never re-issue an ISSUING grant after a DB failure or uncertain external result.
-			// The reaper changes abandoned issuance to UNKNOWN within its creation deadline.
+			// The reaper changes abandoned issuance to UNKNOWN after its issuance timeout.
 			failure();
 		}
 	}

@@ -17,10 +17,12 @@ public class FileUserKeyStore implements UserKeyStore {
 		this.crypto = crypto;
 	}
 	@Override
+	public String reference(UUID allocationId) { return allocationId.toString(); }
+	@Override
 	public String create(UUID userId) {
 		try {
 			Files.createDirectories(directory);
-			String keyRef = userId.toString();
+			String keyRef = reference(userId);
 			Files.write(directory.resolve(keyRef), crypto.randomBytes(32), StandardOpenOption.CREATE_NEW);
 			return keyRef;
 		} catch (Exception exception) { throw new IllegalStateException("User key provisioning failed."); }

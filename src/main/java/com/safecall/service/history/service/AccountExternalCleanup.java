@@ -32,15 +32,15 @@ public class AccountExternalCleanup {
 		this.jdbc=jdbc;this.crypto=crypto;this.keys=keys;this.temporaryKeys=temporaryKeys;this.kakao=kakao;this.mapper=mapper;this.clock=clock;
 		transaction=new TransactionTemplate(manager);
 	}
-	@Scheduled(fixedDelayString="${app.auth.cleanup-delay-ms}",initialDelayString="${app.auth.cleanup-delay-ms}")
+	@Scheduled(scheduler="cleanupScheduler",fixedDelayString="${app.auth.cleanup-delay-ms}",initialDelayString="${app.auth.cleanup-delay-ms}")
 	public void run() {
 		try {
-			for(byte[] id:jdbc.queryForList("SELECT `id` FROM `deletionJob` WHERE `scope`='ACCOUNT' AND `status`='LOCAL_DELETED' ORDER BY `requestedAt` LIMIT 100",byte[].class))runOne(uuid(id));
+			for(byte[] id:jdbc.queryForList("SELECT `id` FROM `deletionJob` WHERE `scope`='ACCOUNT' AND `status`='LOCAL_DELETED' AND (`externalNextAttemptAt` IS NULL OR `externalNextAttemptAt`<=?) ORDER BY `externalNextAttemptAt`,`requestedAt`,`id` LIMIT 100",byte[].class,time(clock.instant())))runOne(uuid(id));
 		} catch(RuntimeException exception) { log(); }
 	}
 	public void runOne(UUID id) {
 		Claim claim;
-		try { claim=transaction.execute(tx->claim(id)); } catch(RuntimeException exception) { log();return; }
+		try { claim=transaction.execute(tx->claim(id)); } catch(RuntimeException exception) { deferUnclaimed(id);log();return; }
 		if(claim==null)return;
 		try {
 			keys.discard(claim.userKeyRef());
@@ -48,7 +48,7 @@ public class AccountExternalCleanup {
 			transaction.executeWithoutResult(tx->{
 				int updated=jdbc.update("""
 					UPDATE `deletionJob` SET `status`='COMPLETED',`completedAt`=?,`errorCode`=NULL,
-					`cleanupCipher`=NULL,`cleanupKeyRef`=NULL,`accountSubjectHash`=NULL
+					`cleanupCipher`=NULL,`cleanupKeyRef`=NULL,`accountSubjectHash`=NULL,`externalNextAttemptAt`=NULL
 					WHERE `id`=? AND `status`='LOCAL_DELETED' AND `cleanupCipher`=?
 					""",time(clock.instant()),bin(id),claim.cipher());
 				if(updated==1)temporaryKeys.discardAfterCommit(claim.keyRef());
@@ -59,16 +59,28 @@ public class AccountExternalCleanup {
 		}
 	}
 	private Claim claim(UUID id) {
-		var rows=jdbc.queryForList("SELECT `cleanupKeyRef`,`cleanupCipher` FROM `deletionJob` WHERE `id`=? AND `status`='LOCAL_DELETED' FOR UPDATE",bin(id));
+		var rows=jdbc.queryForList("SELECT `cleanupKeyRef`,`cleanupCipher` FROM `deletionJob` WHERE `id`=? AND `scope`='ACCOUNT' AND `status`='LOCAL_DELETED' AND (`externalNextAttemptAt` IS NULL OR `externalNextAttemptAt`<=?) FOR UPDATE",bin(id),time(clock.instant()));
 		if(rows.isEmpty())return null;
 		String ref=(String)rows.getFirst().get("cleanupKeyRef");byte[] key=keys.read(ref);
 		var payload=mapper.readTree(crypto.open(key,"ACCOUNT_CLEANUP:"+id,(byte[])rows.getFirst().get("cleanupCipher")));
-		if(payload.has("leaseUntil") && Instant.parse(payload.path("leaseUntil").asString()).isAfter(clock.instant()))return null;
+		if(payload.has("leaseUntil") && Instant.parse(payload.path("leaseUntil").asString()).isAfter(clock.instant())){
+			// Preserve an in-flight claim created by the previous application version.
+			jdbc.update("UPDATE `deletionJob` SET `externalNextAttemptAt`=? WHERE `id`=?",time(Instant.parse(payload.path("leaseUntil").asString())),bin(id));
+			return null;
+		}
 		String subject=payload.path("subject").asString(),userKeyRef=payload.path("userKeyRef").asString();
 		byte[] cipher=crypto.seal(key,"ACCOUNT_CLEANUP:"+id,mapper.writeValueAsBytes(Map.of("subject",subject,"userKeyRef",userKeyRef,
 			"leaseUntil",clock.instant().plusSeconds(60).toString())));
-		jdbc.update("UPDATE `deletionJob` SET `cleanupCipher`=? WHERE `id`=?",cipher,bin(id));
+		jdbc.update("UPDATE `deletionJob` SET `cleanupCipher`=?,`externalNextAttemptAt`=? WHERE `id`=?",cipher,time(clock.instant().plusSeconds(60)),bin(id));
 		return new Claim(id,ref,cipher,subject,userKeyRef);
+	}
+	private void deferUnclaimed(UUID id) {
+		try {
+			// Key-read/decryption failures must not monopolize the batch either. A future
+			// retry time protects a concurrently committed claim, including an uncertain commit.
+			transaction.executeWithoutResult(tx->jdbc.update("UPDATE `deletionJob` SET `externalNextAttemptAt`=? WHERE `id`=? AND `scope`='ACCOUNT' AND `status`='LOCAL_DELETED' AND (`externalNextAttemptAt` IS NULL OR `externalNextAttemptAt`<=?)",
+				time(clock.instant().plusSeconds(60)),bin(id),time(clock.instant())));
+		} catch(RuntimeException unavailable) { log(); }
 	}
 	private static UUID uuid(byte[] bytes) {var b=ByteBuffer.wrap(bytes);return new UUID(b.getLong(),b.getLong());}
 	private void log() { org.slf4j.LoggerFactory.getLogger(getClass()).error("Account external cleanup remains pending and will be retried."); }

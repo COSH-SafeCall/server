@@ -47,7 +47,7 @@ public class CallService {
 	}
 	private Replay replay(Session s,UUID id,String op,UUID key,byte[] hash){Replay r=auth.replay(scope(s,id),op,key);if(r!=null){match(r.requestHash(),hash);if(!r.status().equals("DONE"))throw new CustomException(ErrorCode.REQUEST_IN_PROGRESS,1);}return r;}
 	private void remember(Session s,UUID target,String op,UUID key,byte[] hash,UUID result){auth.saveReplay(UUID.randomUUID(),s,scope(s,target),op,key,hash,result,null,null,now());}
-	public CallView create(String cookie,String page,CreateCall body,UUID key){
+	public CallView create(String cookie,String page,CreateCall body,UUID key,String remoteAddress){
 		Session s=authentication.authenticated(cookie);byte[] pageHash=pageHash(page),hash=hash(body);Instant now=now();
 		Replay r=replay(s,null,"CALL_CREATE",key,hash);if(r!=null)return expire(owned(s,r.resourceId(),page),now).view();
 		Call prior=repository.byClient(s.id(),body.clientCallId());
@@ -60,7 +60,7 @@ public class CallService {
 		if(!gemini.isConfigured())throw new CustomException(ErrorCode.PROMPT_NOT_READY);
 		Prompt prompt=prompt(null,body.scenarioCode(),body.counterpartCode(),now);
 		if(!policy.isValidated(prompt.model()))throw new CustomException(ErrorCode.GEMINI_VALIDATION_REQUIRED);
-		var composed=composer.compose(prompt,auth.user(s.userId(),false),now);limits(s,now);
+		var composed=composer.compose(prompt,auth.user(s.userId(),false),now);limits(s,now,remoteAddress);
 		Instant expiry=min(now.plusSeconds(Math.min(settings.connectionSeconds(),policy.modelMaxSeconds())),s.expiresAt());
 		UUID id=UUID.randomUUID();repository.insert(id,s,body,prompt.releaseId(),composed.isDemographicApplied(),composed.isGenderAddressApplied(),now,expiry,pageHash);
 		repository.event(id,UUID.randomUUID(),hash,"CREATED","CREATED",now,now);repository.preparing(id);repository.event(id,UUID.randomUUID(),hash,"PREPARING","PREPARING",now,now);
@@ -135,7 +135,7 @@ public class CallService {
 	private String failure(Grant g){return g.purpose().equals("RESUME")?"RESUMPTION_FAILED":"CONNECTION_FAILED";}
 	private Call expire(Call c,Instant now){
 		if(c.isTerminal())return c;Grant g=repository.grant(c.view().id());
-		if(g.status().equals("ISSUING")&&!g.createdAt().plusSeconds(policy.issueTimeoutSeconds()).isAfter(now)){terminate(c,"FAILED",failure(g),now);repository.markUnknown(g.id());}
+		if(g.status().equals("ISSUING")&&(g.issuingStartedAt()==null||!g.issuingStartedAt().plusSeconds(policy.issueTimeoutSeconds()).isAfter(now))){terminate(c,"FAILED",failure(g),now);repository.markUnknown(g.id());}
 		else if(!c.view().expiresAt().isAfter(now))terminate(c,"ENDED","DURATION_LIMIT",now);
 		else if(!c.view().leaseExpiresAt().isAfter(now))terminate(c,"ENDED","SESSION_EXPIRED",now);
 		else if(g.status().equals("READY")&&!g.newSessionExpiresAt().isAfter(now))terminate(c,"FAILED",failure(g),now);
@@ -162,14 +162,22 @@ public class CallService {
 		if(all.size()!=12 || expected.size()!=12 || !combinations.equals(expected))throw new CustomException(ErrorCode.PROMPT_NOT_READY);
 	}
 
-	private void limits(Session s,Instant now){
+	private void limits(Session s,Instant now,String remoteAddress){
 		Instant minute=now.truncatedTo(ChronoUnit.MINUTES),day=now.atZone(ZoneId.of("Asia/Seoul")).toLocalDate().atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant();
 		byte[] session=crypto.hash("CALL_RATE",s.id().toString()),daily=s.userId()==null?session:crypto.hash("CALL_RATE",s.userId().toString());String kind=s.userId()==null?"SESSION":"USER";
-		if(repository.rate(session,"SESSION","CALL_MINUTE",minute,60,false)>=policy.minuteLimit())throw new CustomException(ErrorCode.RATE_LIMITED,(int)(minute.plusSeconds(60).getEpochSecond()-now.getEpochSecond()));
-		if(repository.rate(daily,kind,"CALL_DAY",day,86400,false)>=(s.userId()==null?policy.guestDailyLimit():policy.memberDailyLimit()))throw new CustomException(ErrorCode.RATE_LIMITED,(int)(day.plusSeconds(86400).getEpochSecond()-now.getEpochSecond()));
-		repository.rate(session,"SESSION","CALL_MINUTE",minute,60,true);repository.rate(daily,kind,"CALL_DAY",day,86400,true);
+		// Increment under the bucket row lock, then reject/roll back the entire creation transaction.
+		if(repository.rate(session,"SESSION","CALL_MINUTE",minute,60,true)>policy.minuteLimit())throw new CustomException(ErrorCode.RATE_LIMITED,(int)(minute.plusSeconds(60).getEpochSecond()-now.getEpochSecond()));
+		if(repository.rate(daily,kind,"CALL_DAY",day,86400,true)>(s.userId()==null?policy.guestDailyLimit():policy.memberDailyLimit()))throw new CustomException(ErrorCode.RATE_LIMITED,(int)(day.plusSeconds(86400).getEpochSecond()-now.getEpochSecond()));
+		if(s.userId()==null){
+			if(remoteAddress==null||remoteAddress.isBlank())throw new CustomException(ErrorCode.INVALID_REQUEST);
+			byte[] ip=crypto.hash("CALL_IP_DAY:v1",day+":"+remoteAddress);
+			if(repository.rate(ip,"IP","CALL_DAY",day,86400,true)>policy.guestDailyLimit())throw new CustomException(ErrorCode.RATE_LIMITED,(int)(day.plusSeconds(86400).getEpochSecond()-now.getEpochSecond()));
+		}
 	}
 	private Call lockForWorker(UUID id){Call c=repository.call(id,false);if(c==null||auth.lockSession(c.sessionId())==null)return null;return repository.call(id,true);}
+	private byte[] setupHash(UUID id,Prompt prompt,String instruction){
+		return crypto.hash("CALL_SETUP:v1:"+id,mapper.writeValueAsString(List.of(prompt.model(),prompt.apiVersion(),prompt.voice(),instruction)));
+	}
 	private boolean workerEligible(Session s,Call c){
 		if(!s.status().equals("ACTIVE")||!s.expiresAt().isAfter(now())){terminate(c,"ENDED","SESSION_EXPIRED",now());return false;}
 		User u=auth.user(s.userId(),false);if(s.userId()!=null&&(u==null||u.status().equals("DELETION_PENDING"))){terminate(c,"ENDED","DATA_DELETION",now());return false;}
@@ -180,7 +188,18 @@ public class CallService {
 		if(!workerEligible(s,c))return null;Grant g=repository.grant(id);if(!g.status().equals("PENDING"))return null;
 		try{
 			Prompt p=prompt(c.releaseId(),c.view().scenarioCode(),c.view().counterpartCode(),now());String instruction=null;
-			if(g.purpose().equals("INITIAL")){var composed=composer.compose(p,auth.user(s.userId(),false),now());instruction=composed.instruction();repository.flags(id,composed.isDemographicApplied(),composed.isGenderAddressApplied());}
+			if(g.purpose().equals("INITIAL")){
+				Instant preparedAt=now();var composed=composer.compose(p,auth.user(s.userId(),false),preparedAt);instruction=composed.instruction();
+				repository.flags(id,composed.isDemographicApplied(),composed.isGenderAddressApplied());
+				repository.anchor(id,preparedAt,setupHash(id,p,instruction));
+			}else{
+				var anchor=repository.anchor(id);
+				if(anchor==null||anchor.preparedAt()==null||anchor.instructionHash()==null)throw new CustomException(ErrorCode.PROMPT_NOT_READY);
+				instruction=composer.compose(p,auth.user(s.userId(),false),anchor.preparedAt()).instruction();
+				// Never change the active conversation's policy or persist the full prompt. Fail closed
+				// if profile, release or composer changes prevent reconstruction of the original setup.
+				if(!crypto.isEqual(anchor.instructionHash(),setupHash(id,p,instruction)))throw new CustomException(ErrorCode.PROMPT_NOT_READY);
+			}
 			if(!repository.claim(g.id(),now()))return null;
 			return new GeminiClient.IssueRequest(p.model(),p.apiVersion(),p.voice(),instruction,min(now().plusSeconds(settings.newSessionSeconds()),c.view().expiresAt()),c.view().expiresAt(),g.id(),g.purpose());
 		}catch(CustomException ex){terminate(c,"FAILED",failure(g),now());return null;}

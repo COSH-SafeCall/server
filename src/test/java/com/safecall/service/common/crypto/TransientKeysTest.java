@@ -10,17 +10,21 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 class TransientKeysTest {
 	private final UserKeyStore store=mock(UserKeyStore.class);
-	private final TransientKeys keys=new TransientKeys(store);
-	@AfterEach void clear(){if(TransactionSynchronizationManager.isSynchronizationActive())TransactionSynchronizationManager.clearSynchronization();}
+	private final KeyDiscardQueue queue=mock(KeyDiscardQueue.class);
+	private final TransientKeys keys=new TransientKeys(store,queue);
+	private final UUID job=UUID.randomUUID();
+	@AfterEach void clear(){if(TransactionSynchronizationManager.isSynchronizationActive())TransactionSynchronizationManager.clearSynchronization();TransactionSynchronizationManager.setActualTransactionActive(false);}
 	private TransactionSynchronization create(){
 		TransactionSynchronizationManager.initSynchronization();
+		TransactionSynchronizationManager.setActualTransactionActive(true);
+		when(store.reference(any())).thenReturn("synthetic-key-ref");when(queue.prepareCreation("synthetic-key-ref")).thenReturn(job);
 		when(store.create(any())).thenReturn("synthetic-key-ref");
 		keys.create(UUID.randomUUID());
 		return TransactionSynchronizationManager.getSynchronizations().getFirst();
 	}
 	@Test void rollbackDiscardsNewKey(){
 		create().afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
-		verify(store).discard("synthetic-key-ref");
+		verify(queue).attempt(job);
 	}
 	@Test void committedTransactionRetainsNewKey(){
 		create().afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
@@ -34,13 +38,13 @@ class TransientKeysTest {
 		assertThatThrownBy(()->keys.create(UUID.randomUUID())).isInstanceOf(IllegalStateException.class);
 		verifyNoInteractions(store);
 	}
-	@Test void existingKeyIsDiscardedOnlyAfterSuccessfulCommit(){
+	@Test void existingKeyRecordsIntentWithoutCallingExternalStoreOnCommit(){
 		TransactionSynchronizationManager.initSynchronization();
+		UUID job=UUID.randomUUID();when(queue.enqueue("existing-key-ref")).thenReturn(job);
 		keys.discardAfterCommit("existing-key-ref");
-		var synchronization=TransactionSynchronizationManager.getSynchronizations().getFirst();
-		synchronization.afterCompletion(TransactionSynchronization.STATUS_UNKNOWN);
+		verify(queue).enqueue("existing-key-ref");
+		assertThat(TransactionSynchronizationManager.getSynchronizations()).isEmpty();
 		verifyNoInteractions(store);
-		synchronization.afterCommit();
-		verify(store).discard("existing-key-ref");
+		verify(queue,never()).attempt(any());
 	}
 }

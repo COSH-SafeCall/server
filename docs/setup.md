@@ -9,7 +9,7 @@
 1. Java 21, MySQL 8.0.41 이상 8.0/8.4를 준비한다. 테스트를 실행할 경우 Python 3도 필요하다.
 2. 아래 표를 참고하여 로컬 `.env`에 필요한 값을 직접 입력한다. 기존 `.env`가 있으면 전체 파일을 덮어쓰지 않는다.
 3. 기본값을 사용할 선택 항목은 `.env`에서 그 줄을 제거한다. `KEY=`는 빈 값이며 `${KEY:기본값}`의 기본값 선택과 다르다. 숫자·URL 항목을 빈 줄로 남기면 시작에 실패할 수 있다.
-4. [DB 설치](local-db-setup.md)와 필요한 문서 발행을 마친 뒤 `./gradlew.bat bootRun`을 실행한다.
+4. [DB 설치](database.md)와 필요한 문서 발행을 마친 뒤 `./gradlew.bat bootRun`을 실행한다.
 
 ## DB·웹·암호화
 
@@ -26,7 +26,7 @@
 | CSRF_SECRET / HMAC_SECRET / RESPONSE_ENCRYPTION_SECRET | 서로 다른 난수 32바이트를 Base64로 인코딩한 값. 모두 필수 |
 | CRYPTO_KEY_DIRECTORY | local DB 외부 키 디렉터리 / `.keys` |
 
-암호화 키는 기존 데이터의 복호화·식별에 사용한다. 기존 키를 임의로 새 값으로 바꾸지 않는다. 키 디렉터리 접근 권한은 실행 계정으로 제한한다. prod의 외부 키 저장소 조건은 [배포 문서](aws-deployment-readiness.md)를 따른다.
+암호화 키는 기존 데이터의 복호화·식별에 사용한다. 기존 키를 임의로 새 값으로 바꾸지 않는다. 키 디렉터리 접근 권한은 실행 계정으로 제한한다. prod의 외부 키 저장소 조건은 [배포 문서](deployment.md)를 따른다.
 
 ## 카카오 OAuth
 
@@ -41,7 +41,7 @@
 | AUTH_REQUESTS_PER_MINUTE | 인증 시작 IP별 분당 제한 / `10` |
 | AUTH_CLEANUP_DELAY_MS | 인증·삭제·보존 정리 주기(ms) / `1000` |
 
-origin을 바꾸면 redirect URI도 함께 설정한다. 서버 포트만 바꾸어도 WEB_ORIGIN이 자동 변경되는 것은 아니다. **WEB_ORIGIN은 허용 출처 설정이며 HTTPS 리스너나 인증서를 구성하지 않는다.** 현재 기본 서버는 HTTP로 실행되므로 HTTPS 주소를 사용하려면 해당 주소에서 TLS를 처리할 개발 프록시 등의 구성이 따로 필요하다. 브라우저·콘솔 등록은 [카카오 설정](kakao-token-test-setup.md)을 참고한다.
+origin을 바꾸면 redirect URI도 함께 설정한다. 서버 포트만 바꾸어도 WEB_ORIGIN이 자동 변경되는 것은 아니다. **WEB_ORIGIN은 허용 출처 설정이며 HTTPS 리스너나 인증서를 구성하지 않는다.** 현재 기본 서버는 HTTP로 실행되므로 HTTPS 주소를 사용하려면 해당 주소에서 TLS를 처리할 개발 프록시 등의 구성이 따로 필요하다. 브라우저·콘솔 등록은 [카카오 설정](setup.md#카카오-앱-등록)을 참고한다.
 
 ## Gemini·통화
 
@@ -58,10 +58,10 @@ origin을 바꾸면 redirect URI도 함께 설정한다. 서버 포트만 바꾸
 | CALL_MAX_RESUME_ATTEMPTS | 같은 통화 전체 재개 예산 / `1` |
 | CALL_RESUME_DELAY_MS | 재개 대기(ms) / `1000` |
 | CALL_LEASE_SECONDS | heartbeat lease(초) / `30`, 5보다 커야 함 |
-| CALL_ISSUE_TIMEOUT_SECONDS | ISSUING 결과 불명 판정 기한(초) / `10`, 1 이상이며 lease 미만. grant 생성 시각 기준 |
+| CALL_ISSUE_TIMEOUT_SECONDS | ISSUING 결과 불명 판정 기한(초) / `10`, 1 이상이며 lease 미만. 발급 선점 시각 `issuingStartedAt` 기준 |
 | CALL_WORKER_DELAY_MS | 통화 작업자 실행 주기(ms) / `1000` |
 
-모델/API/voice는 발행된 promptRelease/personaPrompt에서 읽는다. 환경변수만 입력하거나 DRAFT 초안을 넣는 것으로 통화가 준비되지는 않는다. 발행 경로는 [명세·코드 대응](ai-safety-call-reference-review.md)을 참고한다.
+모델/API/voice는 발행된 promptRelease/personaPrompt에서 읽는다. 환경변수만 입력하거나 DRAFT 초안을 넣는 것으로 통화가 준비되지는 않는다. [프롬프트 발행](#문서와-프롬프트-발행)을 참고한다.
 
 예를 들어 connection TTL을 30초로 줄이면 new-session TTL도 30초 이하로 맞춰야 한다. 기본 60초를 그대로 두면 시작 시 설정 검증에 실패한다. 통화의 최종 만료는 서버 상한·검수된 모델 상한·웹 세션 잔여 시간의 최솟값이다.
 
@@ -82,11 +82,29 @@ origin을 바꾸면 redirect URI도 함께 설정한다. 서버 포트만 바꾸
 
 ## 시작 문제 확인
 
+작업자·DB 연결 구성은 [서비스 구조](architecture.md#작업자와-키-수명)를 참고한다.
+
 | 증상 | 먼저 확인할 항목 |
 |---|---|
 | 숫자·URL 변환 또는 정책 초기화 실패 | 값이 빈 항목, 포트/origin/callback 불일치, 허용 범위 |
 | 암호화 설정 실패 | Base64로 인코딩한 32바이트 키 3개 및 키 간 중복 |
 | DB 연결 실패 | DB 설치 여부, 전용 계정, 호스트/포트/권한 |
-| 세션 쿠키가 브라우저에 남지 않음 | [공통 요청 가이드](swagger-test-guide.md)의 HTTPS·origin 조건 |
+| 세션 쿠키가 브라우저에 남지 않음 | [공통 요청 가이드](swagger/README.md)의 HTTPS·origin 조건 |
 | 통화 시작 503 | provider 키, PUBLISHED 프롬프트, 모델 검수 설정 |
-| prod 시작 실패 | [외부 UserKeyStore 및 배포 조건](aws-deployment-readiness.md) |
+| prod 시작 실패 | [외부 UserKeyStore 및 배포 조건](deployment.md) |
+
+## 카카오 앱 등록
+
+1. 카카오 앱에 웹 서비스 주소와 `WEB_ORIGIN` + `/api/v1/auth/kakao/callback`을 정확히 등록한다.
+2. 앱 ID·REST API 키·활성화한 client secret을 서버 환경에 설정하고 승인받은 프로필 scope를 맞춘다.
+3. ACCOUNT 연결 해제 검증에는 별도의 서버 전용 `KAKAO_ADMIN_KEY`가 필요하다.
+4. callback은 서버 Controller가 처리해야 한다. SPA fallback으로 넘기지 않는다. callback 이후 `/onboarding/profile`, `/settings`, `/login`은 프론트엔드 화면 경로다. 백엔드만 검증할 때는 callback 처리가 끝난 뒤 같은 origin의 Swagger로 돌아와 A05를 다시 조회한다.
+5. 실제 로그인·취소·동일 계정 REAUTH는 [인증 흐름](swagger/auth.md)에 따라 확인한다.
+
+## 문서와 프롬프트 발행
+
+회원 로그인 전 PRIVACY_PROCESSING, AI_CALL, LOCATION_PROCESSING과 안내 문서를 검수하여 DB에 적용한다. 동의 문서 3종의 최초 버전과 isCurrent는 프로젝트 기간 동안 고정한다. 공개 문서 발행 HTTP API와 자동 seed는 없다.
+
+[개발 프롬프트 SQL](../db/dev/seed-draft-call-prompts.sql)은 DRAFT다. 실제 모델/API/voice와 안전성을 검수한 뒤 [PromptPublicationService](../src/main/java/com/safecall/service/call/service/PromptPublicationService.java)로 4개 상황 × 3개 상대의 12개 조합을 발행한다. 이전 PUBLISHED는 RETIRED로 전환하며 기존 통화는 자신의 releaseId를 유지한다.
+
+[발행 명령](../src/main/java/com/safecall/service/call/service/PromptPublicationCommand.java)은 앱 시작 시 `app.prompts.publish-release-id`와 `app.prompts.validation-ref`를 명시한 경우에만 실행된다. 실제 release UUID와 검수 참조를 사용하며 실행 후 시작 설정에서 제거한다. DB를 변경하는 명령이고 Swagger API가 아니다. 임의 검수값으로 발행 조건을 통과시키지 않는다.
