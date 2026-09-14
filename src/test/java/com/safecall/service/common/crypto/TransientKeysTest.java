@@ -38,15 +38,13 @@ class TransientKeysTest {
 		assertThatThrownBy(()->keys.create(UUID.randomUUID())).isInstanceOf(IllegalStateException.class);
 		verifyNoInteractions(store);
 	}
-	@Test void existingKeyIsDiscardedOnlyAfterSuccessfulCommit(){
+	@Test void existingKeyRecordsIntentWithoutCallingExternalStoreOnCommit(){
 		TransactionSynchronizationManager.initSynchronization();
 		UUID job=UUID.randomUUID();when(queue.enqueue("existing-key-ref")).thenReturn(job);
 		keys.discardAfterCommit("existing-key-ref");
 		verify(queue).enqueue("existing-key-ref");
-		var synchronization=TransactionSynchronizationManager.getSynchronizations().getFirst();
-		synchronization.afterCompletion(TransactionSynchronization.STATUS_UNKNOWN);
+		assertThat(TransactionSynchronizationManager.getSynchronizations()).isEmpty();
 		verifyNoInteractions(store);
-		synchronization.afterCommit();
-		verify(queue).attempt(job);
+		verify(queue,never()).attempt(any());
 	}
 }

@@ -13,7 +13,7 @@ public class AuthCleanupScheduler {
 	public AuthCleanupScheduler(AuthMaintenance maintenance, AuthTransactions transactions, AuthRepository repository, Clock clock) {
 		this.maintenance = maintenance; this.transactions = transactions; this.repository = repository; this.clock = clock;
 	}
-	@Scheduled(fixedDelayString = "${app.auth.cleanup-delay-ms}", initialDelayString = "${app.auth.cleanup-delay-ms}")
+	@Scheduled(scheduler="cleanupScheduler",fixedDelayString = "${app.auth.cleanup-delay-ms}", initialDelayString = "${app.auth.cleanup-delay-ms}")
 	public void run() {
 		try {
 			maintenance.cleanup();

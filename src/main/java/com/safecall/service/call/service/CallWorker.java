@@ -20,7 +20,7 @@ public class CallWorker {
 	public CallWorker(CallService service,CallRepository repository,GeminiClient gemini,Clock clock) {
 		this.service=service; this.repository=repository; this.gemini=gemini; this.clock=clock;
 	}
-	@Scheduled(fixedDelayString="${app.call.worker-delay-ms}",initialDelayString="${app.call.worker-delay-ms}")
+	@Scheduled(scheduler="callScheduler",fixedDelayString="${app.call.worker-delay-ms}",initialDelayString="${app.call.worker-delay-ms}")
 	public void tick() {
 		try {
 			for(UUID id:repository.expired(clock.instant()))service.reap(id);

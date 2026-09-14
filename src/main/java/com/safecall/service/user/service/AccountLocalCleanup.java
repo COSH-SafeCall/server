@@ -39,7 +39,7 @@ public class AccountLocalCleanup {
 		this.deletionTransactions=deletionTransactions;
 	}
 
-	@Scheduled(fixedDelayString="${app.auth.cleanup-delay-ms}",initialDelayString="${app.auth.cleanup-delay-ms}")
+	@Scheduled(scheduler="cleanupScheduler",fixedDelayString="${app.auth.cleanup-delay-ms}",initialDelayString="${app.auth.cleanup-delay-ms}")
 	public void run() {
 		try {
 			var abandoned=jdbc.queryForList("SELECT `id` FROM `appUser` WHERE `status`='ONBOARDING' AND `createdAt`<=? LIMIT 100",

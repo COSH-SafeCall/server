@@ -21,7 +21,7 @@ public class TransientKeys {
 		if(!ref.equals(keys.create(allocation)))throw new IllegalStateException("Key store violated its stable reference contract.");
 		return ref;}
 	public byte[] read(String ref){return keys.read(ref);}
-	public void discardAfterCommit(String ref){if(ref==null)return;UUID job=queue.enqueue(ref);TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization(){
-		@Override public void afterCommit(){queue.attempt(job);}
-	});}
+	// The durable intent commits with removal of the secret reference. External disposal
+	// runs on the cleanup scheduler, never on an HTTP or call-scheduler afterCommit callback.
+	public void discardAfterCommit(String ref){if(ref!=null)queue.enqueue(ref);}
 }

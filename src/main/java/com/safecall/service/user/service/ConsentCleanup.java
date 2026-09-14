@@ -21,7 +21,7 @@ public class ConsentCleanup {
 		com.safecall.service.common.crypto.TransientKeys keys) {
 		this.jdbc=jdbc;this.auth=auth;this.clock=clock;this.transaction=transaction;this.keys=keys;
 	}
-	@Scheduled(fixedDelayString="${app.auth.cleanup-delay-ms}",initialDelayString="${app.auth.cleanup-delay-ms}")
+	@Scheduled(scheduler="cleanupScheduler",fixedDelayString="${app.auth.cleanup-delay-ms}",initialDelayString="${app.auth.cleanup-delay-ms}")
 	public void run() {
 		try {
 			var jobs=jdbc.queryForList("SELECT `id`,`userId`,`scope` FROM `deletionJob` WHERE `pendingMarker`=1 AND `scope` IN ('AI_DATA','LOCATION_DATA') ORDER BY `requestedAt` LIMIT 100");

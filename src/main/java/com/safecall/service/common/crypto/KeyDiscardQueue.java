@@ -56,7 +56,7 @@ public class KeyDiscardQueue {
 			}catch(RuntimeException unavailable){org.slf4j.LoggerFactory.getLogger(getClass()).error("Key discard rescheduling unavailable; durable job retained.");}
 		}
 	}
-	@Scheduled(fixedDelayString="${app.crypto.discard-delay-ms:30000}",initialDelayString="${app.crypto.discard-delay-ms:30000}")
+	@Scheduled(scheduler="cleanupScheduler",fixedDelayString="${app.crypto.discard-delay-ms:1000}",initialDelayString="${app.crypto.discard-delay-ms:1000}")
 	public void run(){
 		var jobs=jdbc.query("SELECT `id` FROM `keyDiscardJob` WHERE `nextAttemptAt`<=? ORDER BY `nextAttemptAt`,`id` LIMIT 100",(r,n)->{
 			var bytes=java.nio.ByteBuffer.wrap(r.getBytes("id"));return new UUID(bytes.getLong(),bytes.getLong());

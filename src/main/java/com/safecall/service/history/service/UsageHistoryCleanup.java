@@ -23,7 +23,7 @@ public class UsageHistoryCleanup {
 	public UsageHistoryCleanup(JdbcTemplate jdbc,AuthRepository auth,UserRepository users,SecretCrypto crypto,TransientKeys keys,Clock clock,LocalDeletionTransactions transaction) {
 		this.jdbc=jdbc;this.auth=auth;this.users=users;this.crypto=crypto;this.keys=keys;this.clock=clock;this.transaction=transaction;
 	}
-	@Scheduled(fixedDelayString="${app.auth.cleanup-delay-ms}",initialDelayString="${app.auth.cleanup-delay-ms}")
+	@Scheduled(scheduler="cleanupScheduler",fixedDelayString="${app.auth.cleanup-delay-ms}",initialDelayString="${app.auth.cleanup-delay-ms}")
 	public void run() {
 		try {
 			var jobs=jdbc.queryForList("SELECT `id`,`userId` FROM `deletionJob` WHERE `scope`='USAGE_HISTORY' AND `status`='PENDING' ORDER BY `requestedAt` LIMIT 100");

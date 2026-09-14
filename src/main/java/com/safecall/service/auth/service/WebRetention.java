@@ -25,7 +25,7 @@ public class WebRetention {
 	public WebRetention(JdbcTemplate jdbc,AuthRepository auth,SecretCrypto crypto,TransientKeys keys,Clock clock,PlatformTransactionManager manager) {
 		this.jdbc=jdbc;this.auth=auth;this.crypto=crypto;this.keys=keys;this.clock=clock;this.transaction=new TransactionTemplate(manager);
 	}
-	@Scheduled(fixedDelayString="${app.auth.cleanup-delay-ms}",initialDelayString="${app.auth.cleanup-delay-ms}")
+	@Scheduled(scheduler="cleanupScheduler",fixedDelayString="${app.auth.cleanup-delay-ms}",initialDelayString="${app.auth.cleanup-delay-ms}")
 	public void run() {
 		try {
 			var sessions=jdbc.queryForList("""

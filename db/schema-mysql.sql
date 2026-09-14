@@ -431,6 +431,7 @@ CREATE TABLE `deletionJob` (
 	`requestedAt` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '삭제/정리 요청을 접수한 시각',
 	`cutoffAt` DATETIME(6) NOT NULL COMMENT '해당 시각까지 생성된 데이터의 삭제 기준',
 	`dueAt` DATETIME(6) NOT NULL COMMENT '작업 완료 목표 기한',
+	`externalNextAttemptAt` DATETIME(6) NULL COMMENT 'ACCOUNT 외부 정리 재시도/선점 만료 시각; NULL은 즉시 대상',
 	`completedAt` DATETIME(6)  COMMENT '작업/시도 최종 완료 시각',
 	`errorCode` VARCHAR(40)  COMMENT '개인정보 없는 내부 표준 오류 코드',
 	`receiptExpiresAt` DATETIME(6) NOT NULL COMMENT '접수증 조회 권한 만료 시각',
@@ -449,6 +450,7 @@ CREATE TABLE `deletionJob` (
 	CONSTRAINT `ckDeletionSubjectCompleted` CHECK (`status`<>'COMPLETED' OR `accountSubjectHash` IS NULL),
 	CONSTRAINT `uqDeletionPendingSubject` UNIQUE (`accountSubjectHash`,`pendingMarker`),
 	INDEX `ixDeletionDue` (`status`,`dueAt`),
+	INDEX `ixDeletionExternalRetry` (`scope`,`status`,`externalNextAttemptAt`,`requestedAt`,`id`),
 	CONSTRAINT `ckDeletionCleanupKey` CHECK ((`cleanupCipher` IS NULL)=(`cleanupKeyRef` IS NULL)),
 	CONSTRAINT `ckDeletionCleanupDone` CHECK (`status`<>'COMPLETED' OR `cleanupCipher` IS NULL),
 	CONSTRAINT `ckDeletionTimes` CHECK (`dueAt`>=`requestedAt` AND `receiptExpiresAt`>`requestedAt` AND (`completedAt` IS NULL OR `completedAt`>=`requestedAt`))
