@@ -19,7 +19,7 @@ class HttpGeminiClientTest {
 		return new GeminiClient.IssueRequest("models/gemini-3.1-flash-live-preview","v1beta","Puck","synthetic system policy",
 			Instant.parse("2026-09-10T00:01:00Z"),Instant.parse("2026-09-10T00:09:00Z"));
 	}
-	@Test void initialGrantLocksModelVoiceInstructionsAndEnablesResumption() {
+	@Test void grantLocksModelVoiceAndInstructionsWithoutResumption() {
 		server.expect(requestTo(URL)).andExpect(method(HttpMethod.POST)).andExpect(header("x-goog-api-key","synthetic-key"))
 			.andExpect(jsonPath("$.uses").value(1)).andExpect(jsonPath("$.expireTime").value("2026-09-10T00:09:00Z"))
 			.andExpect(jsonPath("$.newSessionExpireTime").value("2026-09-10T00:01:00Z"))
@@ -28,38 +28,10 @@ class HttpGeminiClientTest {
 			.andExpect(jsonPath("$.bidiGenerateContentSetup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName").value("Puck"))
 			.andExpect(jsonPath("$.bidiGenerateContentSetup.generationConfig.responseModalities[0]").value("AUDIO"))
 			.andExpect(jsonPath("$.bidiGenerateContentSetup.tools").doesNotExist())
-			.andExpect(jsonPath("$.bidiGenerateContentSetup.sessionResumption").isMap())
-			.andExpect(jsonPath("$.fieldMask").value("model,generationConfig,systemInstruction,sessionResumption,tools,contextWindowCompression,inputAudioTranscription,outputAudioTranscription"))
+			.andExpect(jsonPath("$.bidiGenerateContentSetup.sessionResumption").doesNotExist())
+			.andExpect(jsonPath("$.fieldMask").value("model,generationConfig,systemInstruction,tools,contextWindowCompression,inputAudioTranscription,outputAudioTranscription"))
 			.andRespond(withSuccess("{\"name\":\"auth_tokens/synthetic-token\"}",MediaType.APPLICATION_JSON));
 		assertThat(client.issue(request())).isEqualTo("auth_tokens/synthetic-token"); server.verify();
-	}
-	@Test void resumeGrantPreservesBrowserHandleAndKeepsSafetyConstraints() {
-		var initial=request();
-		var resume=new GeminiClient.IssueRequest(initial.model(),initial.apiVersion(),initial.voiceId(),"server safety policy",initial.newSessionExpiresAt(),initial.expiresAt(),java.util.UUID.randomUUID(),"RESUME");
-		server.expect(requestTo(URL)).andExpect(httpRequest->{
-			var mock=(org.springframework.mock.http.client.MockClientHttpRequest)httpRequest;
-			var mapper=JsonMapper.builder().build();var root=mapper.readTree(mock.getBodyAsString());
-			var effective=mapper.createObjectNode();
-			effective.set("sessionResumption",mapper.readTree("{\"handle\":\"browser-only-handle\"}"));
-			effective.set("systemInstruction",mapper.readTree("{\"parts\":[{\"text\":\"untrusted override\"}]}"));
-			effective.set("tools",mapper.readTree("[{\"googleSearch\":{}}]"));
-			// Apply the documented AuthToken field overwrite contract to a hostile browser setup.
-			for(String field:root.path("fieldMask").asString().split(",")){
-				var locked=root.path("bidiGenerateContentSetup").get(field);
-				if(locked==null)effective.remove(field);else effective.set(field,locked);
-			}
-			assertThat(effective.path("sessionResumption").path("handle").asString()).isEqualTo("browser-only-handle");
-			assertThat(effective.path("systemInstruction").path("parts").get(0).path("text").asString()).isEqualTo("server safety policy");
-			assertThat(effective.has("tools")).isFalse();
-			assertThat(effective.path("model").asString()).isEqualTo(initial.model());
-			assertThat(effective.path("generationConfig").path("speechConfig").path("voiceConfig").path("prebuiltVoiceConfig").path("voiceName").asString()).isEqualTo("Puck");
-		}).andRespond(withSuccess("{\"name\":\"auth_tokens/synthetic-resume\"}",MediaType.APPLICATION_JSON));
-		assertThat(client.issue(resume)).isEqualTo("auth_tokens/synthetic-resume");server.verify();
-	}
-	@Test void resumeWithoutServerSafetyInstructionIsRejectedBeforeIssuance(){
-		var r=request();
-		var resume=new GeminiClient.IssueRequest(r.model(),r.apiVersion(),r.voiceId(),null,r.newSessionExpiresAt(),r.expiresAt(),java.util.UUID.randomUUID(),"RESUME");
-		assertThatThrownBy(()->client.issue(resume)).isInstanceOf(GeminiClient.IssueException.class);server.verify();
 	}
 	@Test void missingKeyMakesNoRequest() {
 		var blank=new HttpGeminiClient(builder.build(),JsonMapper.builder().build(),"",URL);

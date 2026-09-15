@@ -24,15 +24,16 @@ class HttpKakaoClientTest {
 			@Override public HttpClient.Version version() { return HttpClient.Version.HTTP_1_1; }
 		};
 	}
-	@Test void verifiesAppAndSubjectWithoutImportingProfile() throws Exception {
+	@Test void verifiesAppAndReturnsConsentedProfileForClientPrefill() throws Exception {
 		when(http.send(any(), any(HttpResponse.BodyHandler.class))).thenReturn(
 			response(200, "{\"id\":456,\"app_id\":123,\"expires_in\":100}"),
 			response(200, "{\"id\":456,\"kakao_account\":{\"name\":\" 홍길동 \",\"gender\":\"male\",\"birthday_type\":\"SOLAR\",\"birthyear\":\"2000\",\"birthday\":\"0101\",\"phone_number\":\"+82 10-1234-5678\"}}"));
 		var identity = client.verify("synthetic-provider-token");
 		assertThat(identity.subject()).isEqualTo("456");
-		assertThat(identity.name()).isNull();
-		assertThat(identity.phone()).isNull();
-		assertThat(identity.birthDate()).isNull();
+		assertThat(identity.name()).isEqualTo("홍길동");
+		assertThat(identity.gender()).isEqualTo("MALE");
+		assertThat(identity.phone()).isEqualTo("01012345678");
+		assertThat(identity.birthDate()).isEqualTo(LocalDate.of(2000,1,1));
 	}
 	@Test void wrongAppAndExpiredProviderTokenAreRejected() throws Exception {
 		for (String info : java.util.List.of("{\"id\":456,\"app_id\":999,\"expires_in\":100}", "{\"id\":456,\"app_id\":123,\"expires_in\":0}")) {

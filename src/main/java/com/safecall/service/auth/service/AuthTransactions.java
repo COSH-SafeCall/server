@@ -88,5 +88,5 @@ public class AuthTransactions {
 		if(verified==null || verified.isAfter(now()) || !verified.plusSeconds(policy.sensitiveSeconds()).isAfter(now()))
 			throw new CustomException(ErrorCode.REAUTHENTICATION_REQUIRED);
 	}
-	private SessionView view(Session s) { return new SessionView(s.kind(),s.kind().equals("KAKAO"),crypto.csrf(s.id()),s.expiresAt(),s.userId()==null?"LOGIN_ONLY":"MEMBER"); }
+	private SessionView view(Session s) { return new SessionView(s.kind(),s.kind().equals("KAKAO"),crypto.csrf(s.id()),s.expiresAt(),s.userId()==null?"LOGIN_ONLY":"MEMBER",null); }
 }

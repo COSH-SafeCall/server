@@ -75,8 +75,6 @@ app:
     model-max-seconds: ${GEMINI_MODEL_MAX_SECONDS:0}
   call:
     policy-version: ${CALL_POLICY_VERSION:mvp-2026-09-11}
-    max-resume-attempts: ${CALL_MAX_RESUME_ATTEMPTS:1}
-    resume-delay-ms: ${CALL_RESUME_DELAY_MS:1000}
     lease-seconds: ${CALL_LEASE_SECONDS:30}
     issue-timeout-seconds: ${CALL_ISSUE_TIMEOUT_SECONDS:10}
     worker-delay-ms: ${CALL_WORKER_DELAY_MS:1000}

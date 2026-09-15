@@ -11,7 +11,7 @@
 | 인증 | [OAuthService](../src/main/java/com/safecall/service/auth/service/OAuthService.java), [AuthTransactions](../src/main/java/com/safecall/service/auth/service/AuthTransactions.java) | 세션 쿠키, OAuth code 교환, LOGIN/REAUTH. 화면 단계는 프론트 관리 |
 | 사용자 | [UserTransactions](../src/main/java/com/safecall/service/user/service/UserTransactions.java) | 프로필·동의·연락망·설정과 version 검사 |
 | 홈 | [HomeService](../src/main/java/com/safecall/service/home/service/HomeService.java) | 기능 자격과 통화 선택지 |
-| 통화 | [CallService](../src/main/java/com/safecall/service/call/service/CallService.java), [CallWorker](../src/main/java/com/safecall/service/call/service/CallWorker.java) | 생성·상태 전이·발급·만료·재개 |
+| 통화 | [CallService](../src/main/java/com/safecall/service/call/service/CallService.java), [CallWorker](../src/main/java/com/safecall/service/call/service/CallWorker.java) | 생성·상태 전이·발급·만료·종료 |
 | 메시지 | [MessageService](../src/main/java/com/safecall/service/message/service/MessageService.java) | 클릭 시 작성 자격과 최신 수신자 재검증 |
 | 이력·삭제 | [HistoryService](../src/main/java/com/safecall/service/history/service/HistoryService.java), [AccountExternalCleanup](../src/main/java/com/safecall/service/history/service/AccountExternalCleanup.java) | 이력 커서, 삭제 접수·상태, 외부 정리 |
 | 운영 사건 | [TelemetryService](../src/main/java/com/safecall/service/telemetry/service/TelemetryService.java) | 허용 사건·중복·한도·배치 원자성 |
@@ -21,13 +21,13 @@
 
 세션은 Secure/HttpOnly 쿠키, 변경 요청은 세션별 CSRF로 보호한다. OAuth는 시작 세션에 묶인 state를 한 번 선점하여 code를 교환하고 결과 저장 전에 세션·계정을 재검증한다. 일반 LOGIN과 같은 계정 REAUTH를 구분한다. 카카오 토큰 교환은 본문 수신까지 최대 5초 대기하고 응답은 65,536바이트로 제한한다. 이는 OAuth 전체 흐름의 총 제한 시간이 아니다.
 
-UUID는 swap 없는 BINARY(16), 시간은 UTC DATETIME(6)로 저장한다. 개인정보는 암호문·용도별 HMAC·DB 외부 keyRef로 관리한다. 음성·대화·완성 프롬프트·좌표·메시지 본문·재개 handle은 저장하지 않는다. 핵심 변경 경로의 잠금 순서는 계정 → 세션 → 통화 → grant다. OAuth/Gemini 네트워크 요청은 선점 트랜잭션과 결과 저장 트랜잭션 사이에서 수행한다.
+UUID는 swap 없는 BINARY(16), 시간은 UTC DATETIME(6)로 저장한다. 개인정보는 암호문·용도별 HMAC·DB 외부 keyRef로 관리한다. 음성·대화·완성 프롬프트·좌표·메시지 본문은 저장하지 않는다. 핵심 변경 경로의 잠금 순서는 계정 → 세션 → 통화 → grant다. OAuth/Gemini 네트워크 요청은 선점 트랜잭션과 결과 저장 트랜잭션 사이에서 수행한다.
 
 ## 통화·메시지
 
 - 통화 소유권은 세션과 현재 페이지 키를 함께 검사한다. 생성 시 정책을 고정하며 기본 lease는 30초, heartbeat는 5초, 총 상한은 600초·검수 모델 상한·세션 잔여 시간 중 최솟값이다.
 - PENDING → ISSUING 선점 시 `issuingStartedAt`을 기록한다. 기본 10초의 발급 제한은 이 시각부터 계산한다. 결과가 불명확한 grant는 UNKNOWN으로 종료하고 외부에 재발급하지 않는다.
-- 같은 통화 재개는 성공·실패를 합쳐 기본 1회다. 최초 발급 시각으로 현재 허용된 프로필과 고정 release의 지침을 재구성하고 최초 HMAC과 같을 때만 발급한다. 불일치·검증 정보 누락 시 RESUMPTION_FAILED다. 재개 handle은 브라우저 메모리에 둔다.
+- 탭 비활성화·페이지 이탈·연결 중단 시 클라이언트는 마이크·오디오·Gemini 연결을 즉시 중지하고 C06 종료를 시도한다. 종료 요청 유실 시 heartbeat lease 만료로 서버 기록을 정리한다.
 - 게스트 통화 한도는 세션 한도 외에도 접속 IP·KST 날짜의 HMAC 버킷으로 검사한다. 클라이언트의 Forwarded 헤더를 직접 신뢰하지 않는다.
 - M01은 계정·세션 잠금 아래 단일 조회로 프로필·동의·보호자·정리·열린 통화를 읽는다. 현재 작성 자료만 반환하며 SMS를 발송하지 않는다. H01도 같은 작성 자격을 반영한다. USAGE_HISTORY 정리는 메시지 작성 차단 범위에서 제외한다.
 - O01은 사건을 기록할 뿐 통화·인증 상태를 변경하지 않는다. AUTH_SUCCEEDED는 새 GUEST/KAKAO 세션 생성과 함께 서버가 기록한다.
@@ -76,7 +76,6 @@ Swagger 그룹과 API 표시 순서는 [OpenApiDisplayOrder](../src/main/java/co
 | C01 / C02 | POST `/calls`, GET `/calls/{callId}` |
 | C03 / C04 | GET `/calls/{callId}/connection`, POST `/calls/{callId}/events` |
 | C05 / C06 | POST `/calls/{callId}/heartbeat`, POST `/calls/{callId}/end` |
-| C07 | POST `/calls/{callId}/connection-renewals` |
 | M01 | GET `/message-composer?mode=SAFETY` (또는 TEST) |
 | R01 | GET `/me/usage-history?limit=20&cursor=...` |
 | R02 | POST `/me/data-deletions` |

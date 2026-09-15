@@ -13,8 +13,14 @@ public final class AuthDtos {
 	public record AuthorizationView(String authorizationUrl, Instant expiresAt) {
 		@Override public String toString() { return "AuthorizationView[redacted]"; }
 	}
+	public record ProfilePrefill(String name, String gender, LocalDate birthDate, String phone) {
+		@Override public String toString() { return "ProfilePrefill[redacted]"; }
+	}
 	public record SessionView(String kind, boolean isAuthenticated, String csrfToken, Instant expiresAt,
-		String settingsMode) {
+		String settingsMode, ProfilePrefill profilePrefill) {
+		public SessionView withProfilePrefill(ProfilePrefill value) {
+			return new SessionView(kind,isAuthenticated,csrfToken,expiresAt,settingsMode,value);
+		}
 		@Override public String toString() { return "SessionView[redacted]"; }
 	}
 	public record ProfileView(String name, String gender, LocalDate birthDate, String phone,

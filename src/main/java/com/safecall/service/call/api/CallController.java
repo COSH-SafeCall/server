@@ -55,10 +55,4 @@ public class CallController {
 	@Operation(operationId="C06",summary="C06 · 통화 종료",description="반복 안전 종료. 브라우저는 서버 응답을 기다리지 않고 소켓·마이크·재생을 먼저 중지합니다.")
 	public CallView end(@Parameter(hidden=true) @CookieValue(value="__Host-safecall-session",required=false) String access,@PathVariable UUID callId,@RequestHeader("X-Call-Page-Key") String page,
 		@RequestHeader("Idempotency-Key") UUID key,@Valid @RequestBody EndCall body) { return service.end(access,page,callId,body,key); }
-	@PostMapping(value="/{callId}/connection-renewals",consumes="application/json")
-	@Operation(operationId="C07",summary="C07 · 같은 통화 연결 재개")
-	public ResponseEntity<GrantView> renew(@CookieValue(value="__Host-safecall-session",required=false) String cookie,@RequestHeader("X-Call-Page-Key") String page,
-		@PathVariable UUID callId,@RequestHeader("Idempotency-Key") UUID key,@Valid @RequestBody RenewalRequest body){
-		var result=service.renew(cookie,page,callId,body,key);return ResponseEntity.accepted().location(URI.create("/api/v1/calls/"+callId+"/connection?grantId="+result.grantId())).body(result);
-	}
 }

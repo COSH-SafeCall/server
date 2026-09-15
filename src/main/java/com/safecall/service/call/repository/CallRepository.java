@@ -21,7 +21,7 @@ public class CallRepository {
 	public record Call(UUID sessionId, UUID releaseId, Instant lastHeartbeatAt, byte[] pageKeyHash, CallView view) {
 		public boolean isTerminal() { return Set.of("ENDED","FAILED").contains(view.state()); }
 	}
-	public record Grant(UUID id,int generation,String purpose,String keyRef,String status,byte[] tokenCipher,Instant createdAt,Instant issuingStartedAt,Instant newSessionExpiresAt,Instant expiresAt) {
+	public record Grant(UUID id,String keyRef,String status,byte[] tokenCipher,Instant createdAt,Instant issuingStartedAt,Instant newSessionExpiresAt,Instant expiresAt) {
 		@Override public String toString() { return "Grant[status="+status+"]"; }
 	}
 	public record Prompt(UUID releaseId, String model, String apiVersion, String safety, String demographic,
@@ -40,7 +40,7 @@ public class CallRepository {
 	private static final RowMapper<Call> CALL=(r,n)->new Call(uuid(r,"sessionId"),uuid(r,"releaseId"),instant(r,"lastHeartbeatAt"),r.getBytes("pageKeyHash"),
 		new CallView(uuid(r,"id"),uuid(r,"clientCallId"),r.getString("state"),r.getString("startMode"),r.getString("scenarioCode"),
 			r.getString("counterpartCode"),r.getString("displayName"),instant(r,"createdAt"),instant(r,"ringingAt"),
-			instant(r,"answeredAt"),instant(r,"endedAt"),r.getString("endReason"),instant(r,"leaseExpiresAt"),instant(r,"expiresAt"),r.getString("policyVersion"),r.getInt("maxResumeAttempts"),r.getInt("resumeDelayMs"),r.getLong("version")));
+			instant(r,"answeredAt"),instant(r,"endedAt"),r.getString("endReason"),instant(r,"leaseExpiresAt"),instant(r,"expiresAt"),r.getString("policyVersion"),r.getLong("version")));
 	public Call call(UUID id,boolean isLock) {
 		return one(CALL_SQL+"WHERE c.`id`=?"+(isLock ? " FOR UPDATE OF c" : ""),CALL,bin(id));
 	}
@@ -48,12 +48,11 @@ public class CallRepository {
 	public Call open(UUID session) { return one(CALL_SQL+"WHERE c.`sessionId`=? AND c.`activeMarker`=1 FOR UPDATE OF c",CALL,bin(session)); }
 	public Grant grant(UUID id) {return grant(id,null);}
 	public Grant grant(UUID callId,UUID grantId) {
-		return one("SELECT * FROM `connectionGrant` WHERE `callId`=?"+(grantId==null?" ORDER BY `generation` DESC LIMIT 1":" AND `id`=?")+" FOR UPDATE",
-			(r,n)->new Grant(uuid(r,"id"),r.getInt("generation"),r.getString("purpose"),r.getString("keyRef"),r.getString("status"),r.getBytes("tokenCipher"),instant(r,"createdAt"),instant(r,"issuingStartedAt"),instant(r,"newSessionExpiresAt"),instant(r,"expiresAt")),
+		return one("SELECT * FROM `connectionGrant` WHERE `callId`=? AND `purpose`='INITIAL'"+(grantId==null?"":" AND `id`=?")+" FOR UPDATE",
+			(r,n)->new Grant(uuid(r,"id"),r.getString("keyRef"),r.getString("status"),r.getBytes("tokenCipher"),instant(r,"createdAt"),instant(r,"issuingStartedAt"),instant(r,"newSessionExpiresAt"),instant(r,"expiresAt")),
 			grantId==null?new Object[]{bin(callId)}:new Object[]{bin(callId),bin(grantId)});
 	}
-	public int resumeCount(UUID id){return jdbc.queryForObject("SELECT COUNT(*) FROM `connectionGrant` WHERE `callId`=? AND `purpose`='RESUME'",Integer.class,bin(id));}
-	public UUID newGrant(UUID call,int generation,String purpose,Instant now){UUID id=UUID.randomUUID();jdbc.update("INSERT INTO `connectionGrant` (`id`,`callId`,`generation`,`purpose`,`status`,`createdAt`) VALUES (?,?,?,?,'PENDING',?)",bin(id),bin(call),generation,purpose,time(now));return id;}
+	private void newGrant(UUID call,Instant now){UUID id=UUID.randomUUID();jdbc.update("INSERT INTO `connectionGrant` (`id`,`callId`,`generation`,`purpose`,`status`,`createdAt`) VALUES (?,?,1,'INITIAL','PENDING',?)",bin(id),bin(call),time(now));}
 
 	public List<Prompt> prompts(UUID release,Instant now) {
 		return jdbc.query("""
@@ -77,23 +76,15 @@ public class CallRepository {
 	public void insert(UUID id,Session session,CreateCall body,UUID release,boolean demographic,boolean gender,Instant now,Instant expiry,byte[] pageKeyHash) {
 		jdbc.update("""
 			INSERT INTO `callSession` (`id`,`sessionId`,`clientCallId`,`startMode`,`releaseId`,`scenarioCode`,`counterpartCode`,
-			`isDemographicApplied`,`isGenderAddressApplied`,`createdAt`,`lastHeartbeatAt`,`expiresAt`,`pageKeyHash`,`leaseExpiresAt`,`policyVersion`,`maxResumeAttempts`,`resumeDelayMs`)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			`isDemographicApplied`,`isGenderAddressApplied`,`createdAt`,`lastHeartbeatAt`,`expiresAt`,`pageKeyHash`,`leaseExpiresAt`,`policyVersion`)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			""",bin(id),bin(session.id()),bin(body.clientCallId()),body.startMode().name(),bin(release),body.scenarioCode(),body.counterpartCode(),
-			demographic,gender,time(now),time(now),time(expiry),pageKeyHash,time(now.plusSeconds(policy.leaseSeconds()).isBefore(expiry)?now.plusSeconds(policy.leaseSeconds()):expiry),policy.version(),policy.maxResumeAttempts(),policy.resumeDelayMs());
-		newGrant(id,1,"INITIAL",now);
+			demographic,gender,time(now),time(now),time(expiry),pageKeyHash,time(now.plusSeconds(policy.leaseSeconds()).isBefore(expiry)?now.plusSeconds(policy.leaseSeconds()):expiry),policy.version());
+		newGrant(id,now);
 	}
 	public void preparing(UUID id) { jdbc.update("UPDATE `callSession` SET `state`='PREPARING',`version`=2 WHERE `id`=?",bin(id)); }
 	public void flags(UUID id,boolean demographic,boolean gender) {
 		jdbc.update("UPDATE `callSession` SET `isDemographicApplied`=?,`isGenderAddressApplied`=? WHERE `id`=?",demographic,gender,bin(id));
-	}
-	public record PromptAnchor(Instant preparedAt,byte[] instructionHash) {}
-	public void anchor(UUID call,Instant preparedAt,byte[] instructionHash){
-		jdbc.update("UPDATE `callSession` SET `promptPreparedAt`=?,`promptInstructionHash`=? WHERE `id`=?",time(preparedAt),instructionHash,bin(call));
-	}
-	public PromptAnchor anchor(UUID call){
-		return one("SELECT `promptPreparedAt`,`promptInstructionHash` FROM `callSession` WHERE `id`=?",
-			(r,n)->new PromptAnchor(instant(r,"promptPreparedAt"),r.getBytes("promptInstructionHash")),bin(call));
 	}
 	public void event(UUID id,UUID key,byte[] hash,String type,String state,Instant occurred,Instant recorded) {
 		jdbc.update("""

@@ -6,8 +6,8 @@ public interface GeminiClient {
 	boolean isConfigured();
 	String issue(IssueRequest request);
 	record IssueRequest(String model, String apiVersion, String voiceId, String instruction,
-		Instant newSessionExpiresAt, Instant expiresAt, java.util.UUID grantId, String purpose) {
-		public IssueRequest(String model,String apiVersion,String voiceId,String instruction,Instant newSessionExpiresAt,Instant expiresAt){this(model,apiVersion,voiceId,instruction,newSessionExpiresAt,expiresAt,null,"INITIAL");}
+		Instant newSessionExpiresAt, Instant expiresAt, java.util.UUID grantId) {
+		public IssueRequest(String model,String apiVersion,String voiceId,String instruction,Instant newSessionExpiresAt,Instant expiresAt){this(model,apiVersion,voiceId,instruction,newSessionExpiresAt,expiresAt,null);}
 		@Override public String toString() { return "IssueRequest[redacted]"; }
 	}
 	final class IssueException extends RuntimeException {

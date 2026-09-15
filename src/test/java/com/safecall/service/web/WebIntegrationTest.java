@@ -80,11 +80,11 @@ class WebIntegrationTest {
 		for(String scenario:List.of("FOLLOWED","UNSAFE_TAXI","STRANGER_NEARBY","WALKING_ALONE"))for(String person:List.of("FATHER","MOTHER","FRIEND"))jdbc.update("INSERT INTO `personaPrompt` (`releaseId`,`scenarioCode`,`counterpartCode`,`baseInstruction`,`voiceId`) VALUES (?,?,?,'family conversation','Puck')",bin(release),scenario,person);
 	}
 	record Result(int status,JsonNode body,HttpHeaders headers){String text(String field){return body.path(field).asString();}}
-	class Browser {String cookie,csrf;String page=crypto.randomToken();}
+	class Browser {String cookie,profilePrefillCookie,csrf;String page=crypto.randomToken();}
 	Result raw(String method,String path,String body,Browser b,UUID key,String origin,String csrf,String page)throws Exception {
 		var req=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Accept","application/json");
 		if(origin!=null)req.header("Origin",origin);if(body!=null)req.header("Content-Type","application/json");
-		if(b!=null&&b.cookie!=null)req.header("Cookie","__Host-safecall-session="+b.cookie);
+		if(b!=null){var cookies=new ArrayList<String>();if(b.cookie!=null)cookies.add("__Host-safecall-session="+b.cookie);if(b.profilePrefillCookie!=null)cookies.add("__Host-safecall-profile-prefill="+b.profilePrefillCookie);if(!cookies.isEmpty())req.header("Cookie",String.join("; ",cookies));}
 		if(csrf!=null)req.header("X-CSRF-Token",csrf);if(page!=null)req.header("X-Call-Page-Key",page);if(key!=null)req.header("Idempotency-Key",key.toString());
 		req.method(method,body==null?HttpRequest.BodyPublishers.noBody():HttpRequest.BodyPublishers.ofString(body));
 		var response=http.send(req.build(),HttpResponse.BodyHandlers.ofString());
@@ -93,7 +93,7 @@ class WebIntegrationTest {
 	Result send(String method,String path,Object body,Browser b,UUID key)throws Exception{return raw(method,path,body==null?null:mapper.writeValueAsString(body),b,key,ORIGIN,b==null?null:b.csrf,b==null?null:b.page);}
 	void status(Result r,int expected){assertThat(r.status()).as("response: %s",r.body()).isEqualTo(expected);}
 	void code(Result r,int expected,String code){status(r,expected);assertThat(r.text("code")).isEqualTo(code);}
-	void cookie(Browser b,Result r){r.headers().allValues("Set-Cookie").stream().filter(s->s.startsWith("__Host-safecall-session=")).findFirst().ifPresent(s->b.cookie=s.substring(s.indexOf('=')+1,s.indexOf(';')));}
+	void cookie(Browser b,Result r){for(String value:r.headers().allValues("Set-Cookie")){String content=value.substring(value.indexOf('=')+1,value.indexOf(';'));if(value.startsWith("__Host-safecall-session="))b.cookie=content.isEmpty()?null:content;if(value.startsWith("__Host-safecall-profile-prefill="))b.profilePrefillCookie=content.isEmpty()?null:content;}}
 	Browser bootstrap()throws Exception{Browser b=new Browser();var r=send("GET","/api/v1/auth/session",null,b,null);status(r,200);cookie(b,r);b.csrf=r.text("csrfToken");return b;}
 	List<Map<String,Object>> decisions(boolean location){return List.of(Map.of("code","PRIVACY_PROCESSING","version",1,"action","GRANTED"),Map.of("code","AI_CALL","version",1,"action","GRANTED"),Map.of("code","LOCATION_PROCESSING","version",1,"action",location?"GRANTED":"DECLINED"));}
 	String start(Browser b,String purpose,boolean location)throws Exception{
@@ -101,7 +101,7 @@ class WebIntegrationTest {
 		return Arrays.stream(URI.create(r.text("authorizationUrl")).getRawQuery().split("&")).filter(s->s.startsWith("state=")).findFirst().orElseThrow().substring(6);
 	}
 	Result callback(Browser b,String state)throws Exception{return send("GET","/api/v1/auth/kakao/callback?state="+state+"&code=synthetic",null,b,null);}
-	void login(Browser b,String purpose,boolean location)throws Exception{var r=callback(b,start(b,purpose,location));status(r,303);cookie(b,r);var session=send("GET","/api/v1/auth/session",null,b,null);b.csrf=session.text("csrfToken");}
+	Result login(Browser b,String purpose,boolean location)throws Exception{var r=callback(b,start(b,purpose,location));status(r,303);cookie(b,r);var session=send("GET","/api/v1/auth/session",null,b,null);cookie(b,session);b.csrf=session.text("csrfToken");return session;}
 	Browser member()throws Exception{Browser b=bootstrap();login(b,"LOGIN",false);grant(b,false);return b;}
 	void grant(Browser b,boolean location)throws Exception{status(send("POST","/api/v1/me/consents",Map.of("decisions",decisions(location)),b,UUID.randomUUID()),200);}
 
@@ -117,7 +117,6 @@ class WebIntegrationTest {
 	Result event(Browser b,UUID id,String type,String grant)throws Exception{return send("POST","/api/v1/calls/"+id+"/events",eventBody(b,id,type,grant),b,UUID.randomUUID());}
 	String active(Browser b,UUID id)throws Exception{worker.runOne(id);var g=connection(b,id);status(g,200);String grant=g.text("grantId");status(event(b,id,"CONNECTED",grant),200);status(event(b,id,"RINGING_SHOWN",null),200);status(event(b,id,"ANSWERED",null),200);return grant;}
 	Result end(Browser b,UUID id)throws Exception{return send("POST","/api/v1/calls/"+id+"/end",Map.of("reason","TAB_HIDDEN","occurredAt",clock.instant().toString()),b,UUID.randomUUID());}
-	Result renew(Browser b,UUID id,String grant,UUID key)throws Exception{return send("POST","/api/v1/calls/"+id+"/connection-renewals",Map.of("previousGrantId",grant,"reason","GO_AWAY","isResumable",true),b,key);}
 	long count(String table){return jdbc.queryForObject("SELECT COUNT(*) FROM `"+table+"`",Long.class);}
 
 	Map<String,Object> telemetryEvent(String category,String code) {
@@ -266,49 +265,10 @@ class WebIntegrationTest {
 		jdbc.update("UPDATE `appUser` SET `genderSource`='KAKAO',`birthDateSource`='KAKAO' WHERE `id`=?",bin(userId(b)));
 		return b;
 	}
-	@Test void resumedMemberKeepsExactInitialInstructionAcrossBirthday()throws Exception{
-		clock.value.set(Instant.parse("2026-09-12T14:59:50Z"));
-		Browser b=personalizedMember("MALE","2000-09-13");
-		UUID id=create(b);String grant=active(b,id);
-		clock.advance(15);status(renew(b,id,grant,UUID.randomUUID()),202);worker.runOne(id);
-		var requests=org.mockito.ArgumentCaptor.forClass(GeminiClient.IssueRequest.class);verify(gemini,times(2)).issue(requests.capture());
-		var initial=requests.getAllValues().get(0);var resume=requests.getAllValues().get(1);
-		assertThat(initial.instruction()).contains("아들","25 남성");
-		assertThat(resume.instruction()).isEqualTo(initial.instruction());
-		assertThat(resume.purpose()).isEqualTo("RESUME");
-		assertThat(jdbc.queryForObject("SELECT isDemographicApplied FROM callSession WHERE id=?",Boolean.class,bin(id))).isTrue();
-		status(event(b,id,"RESUMED",connection(b,id).text("grantId")),200);
-	}
-	@Test void changedPersonalizationEndsResumptionBeforeIssuingDifferentPolicy()throws Exception{
-		Browser b=personalizedMember("FEMALE","2000-01-01");UUID id=create(b);String grant=active(b,id);
-		var p=send("GET","/api/v1/me/profile",null,b,null);
-		status(send("PATCH","/api/v1/me/profile",profile(p.body().path("version").asLong()),b,UUID.randomUUID()),200);
-		status(renew(b,id,grant,UUID.randomUUID()),202);worker.runOne(id);
-		var call=send("GET","/api/v1/calls/"+id,null,b,null);
-		assertThat(call.text("state")).isEqualTo("FAILED");assertThat(call.text("endReason")).isEqualTo("RESUMPTION_FAILED");
-		verify(gemini,times(1)).issue(any());
-	}
-	@Test void changedReleaseOrMissingAnchorCannotSilentlyChangeResumePolicy()throws Exception{
-		Browser b=guest();UUID id=create(b);String grant=active(b,id);
-		jdbc.update("UPDATE personaPrompt SET baseInstruction='changed policy'");
-		status(renew(b,id,grant,UUID.randomUUID()),202);worker.runOne(id);
-		assertThat(send("GET","/api/v1/calls/"+id,null,b,null).text("endReason")).isEqualTo("RESUMPTION_FAILED");
-		UUID other=create(b);String otherGrant=active(b,other);
-		jdbc.update("UPDATE callSession SET promptPreparedAt=NULL,promptInstructionHash=NULL WHERE id=?",bin(other));
-		status(renew(b,other,otherGrant,UUID.randomUUID()),202);worker.runOne(other);
-		assertThat(send("GET","/api/v1/calls/"+other,null,b,null).text("endReason")).isEqualTo("RESUMPTION_FAILED");
-		verify(gemini,times(2)).issue(any());
-	}
 	@Test void delayedInitialIssuanceStillReturnsUsableToken()throws Exception{
 		Browser b=guest();UUID id=create(b);clock.advance(11);worker.runOne(id);
 		verify(gemini,times(1)).issue(any());status(connection(b,id),200);
 		assertThat(jdbc.queryForObject("SELECT status FROM connectionGrant WHERE callId=?",String.class,bin(id))).isEqualTo("READY");
-	}
-	@Test void delayedResumeIssuanceStillReturnsUsableToken()throws Exception{
-		Browser b=guest();UUID id=create(b);String initial=active(b,id);
-		status(renew(b,id,initial,UUID.randomUUID()),202);clock.advance(11);worker.runOne(id);
-		verify(gemini,times(2)).issue(any());status(connection(b,id),200);
-		assertThat(jdbc.queryForObject("SELECT status FROM connectionGrant WHERE callId=? AND generation=2",String.class,bin(id))).isEqualTo("READY");
 	}
 	@Test void delayedClaimGetsFullTimeoutAndReaperExpiresAtBoundary()throws Exception{
 		Browser b=guest();UUID id=create(b);clock.advance(11);assertThat(calls.claim(id)).isNotNull();
@@ -498,7 +458,7 @@ class WebIntegrationTest {
 	@Test void telemetryAcceptsEveryPublicCodeAndRejectsServerOnlyOrMismatchedCodes()throws Exception {
 		Browser b=guest();var codes=Map.of(
 			"PERMISSION",List.of("MICROPHONE_PERMISSION_REVIEWED","LOCATION_PERMISSION_REVIEWED","PERMISSION_QUERY_UNAVAILABLE"),
-			"CALL",List.of("LIVE_CONNECT_STARTED","LIVE_CONNECT_SUCCEEDED","LIVE_CONNECT_FAILED","RINGING_SHOWN","RINGING_FAILED","PAGE_EXITED","PAGE_RELOADED","LIVE_RESUME_STARTED","LIVE_RESUME_SUCCEEDED","LIVE_RESUME_FAILED"),
+			"CALL",List.of("LIVE_CONNECT_STARTED","LIVE_CONNECT_SUCCEEDED","LIVE_CONNECT_FAILED","RINGING_SHOWN","RINGING_FAILED","PAGE_EXITED","PAGE_RELOADED"),
 			"AUDIO",List.of("FIRST_AUDIO_PLAYED","AUDIO_INTERRUPTED"),"GESTURE",List.of("QUICK_START_SELECTED","QUICK_START_CANCELLED"),
 			"LOCATION",List.of("LOCATION_AVAILABLE","LOCATION_UNAVAILABLE"),"MESSAGE_COMPOSER",List.of("COMPOSER_OPENED","COMPOSER_OPEN_FAILED"),
 			"SOS",List.of("SOS_GUIDE_VIEWED","SOS_GUIDE_FAILED"),"FALLBACK",List.of("FALLBACK_STARTED","FALLBACK_ENDED"));
@@ -507,15 +467,15 @@ class WebIntegrationTest {
 		}
 		for(var invalid:List.of(telemetryEvent("AUTH","AUTH_SUCCEEDED"),telemetryEvent("CALL","COMPOSER_OPENED"),telemetryEvent("CUSTOM","CUSTOM")))
 			code(telemetry(b,List.of(telemetryEvent("SOS","SOS_GUIDE_VIEWED"),invalid)),422,"INVALID_EVENT");
-		assertThat(telemetryCount()).isEqualTo(25);assertThat(telemetryRate()).isEqualTo(25);
+		assertThat(telemetryCount()).isEqualTo(22);assertThat(telemetryRate()).isEqualTo(22);
 	}
 	@Test void telemetryValidatesOutcomeMeaningAndNetworkAllowlist()throws Exception {
 		Browser b=guest();
-		for(var pair:List.of(List.of("CALL","LIVE_CONNECT_SUCCEEDED"),List.of("CALL","RINGING_SHOWN"),List.of("CALL","LIVE_RESUME_SUCCEEDED"),List.of("AUDIO","FIRST_AUDIO_PLAYED"),List.of("LOCATION","LOCATION_AVAILABLE"),List.of("MESSAGE_COMPOSER","COMPOSER_OPENED"),List.of("SOS","SOS_GUIDE_VIEWED"))) {
+		for(var pair:List.of(List.of("CALL","LIVE_CONNECT_SUCCEEDED"),List.of("CALL","RINGING_SHOWN"),List.of("AUDIO","FIRST_AUDIO_PLAYED"),List.of("LOCATION","LOCATION_AVAILABLE"),List.of("MESSAGE_COMPOSER","COMPOSER_OPENED"),List.of("SOS","SOS_GUIDE_VIEWED"))) {
 			var event=telemetryEvent(pair.get(0),pair.get(1));event.put("isSuccess",false);code(telemetry(b,List.of(event)),422,"INVALID_EVENT");
 			event.put("isSuccess",true);eventCounts(telemetry(b,List.of(event)),1,0);
 		}
-		for(var pair:List.of(List.of("PERMISSION","PERMISSION_QUERY_UNAVAILABLE"),List.of("CALL","LIVE_CONNECT_FAILED"),List.of("CALL","RINGING_FAILED"),List.of("CALL","LIVE_RESUME_FAILED"),List.of("LOCATION","LOCATION_UNAVAILABLE"),List.of("MESSAGE_COMPOSER","COMPOSER_OPEN_FAILED"),List.of("SOS","SOS_GUIDE_FAILED"))) {
+		for(var pair:List.of(List.of("PERMISSION","PERMISSION_QUERY_UNAVAILABLE"),List.of("CALL","LIVE_CONNECT_FAILED"),List.of("CALL","RINGING_FAILED"),List.of("LOCATION","LOCATION_UNAVAILABLE"),List.of("MESSAGE_COMPOSER","COMPOSER_OPEN_FAILED"),List.of("SOS","SOS_GUIDE_FAILED"))) {
 			var event=telemetryEvent(pair.get(0),pair.get(1));event.put("isSuccess",true);code(telemetry(b,List.of(event)),422,"INVALID_EVENT");
 			event.put("isSuccess",false);eventCounts(telemetry(b,List.of(event)),1,0);
 		}
@@ -562,7 +522,7 @@ class WebIntegrationTest {
 	}
 	@Test void telemetryConflictsCompareEveryAllowedFieldAndRollbackWholeBatch()throws Exception {
 		Browser b=guest();UUID call=create(b);var event=telemetryEvent("CALL","LIVE_CONNECT_STARTED");eventCounts(telemetry(b,List.of(event)),1,0);
-		for(var change:List.of(Map.entry("callId",(Object)call),Map.entry("code","LIVE_RESUME_STARTED"),Map.entry("isSuccess",true),Map.entry("latencyMs",0),Map.entry("networkType","UNKNOWN"),Map.entry("occurredAt",START.plusSeconds(1).toString()))) {
+		for(var change:List.of(Map.entry("callId",(Object)call),Map.entry("code","PAGE_RELOADED"),Map.entry("isSuccess",true),Map.entry("latencyMs",0),Map.entry("networkType","UNKNOWN"),Map.entry("occurredAt",START.plusSeconds(1).toString()))) {
 			var changed=new HashMap<>(event);changed.put(change.getKey(),change.getValue());
 			code(telemetry(b,List.of(telemetryEvent("SOS","SOS_GUIDE_VIEWED"),changed)),409,"IDEMPOTENCY_CONFLICT");
 		}
@@ -579,7 +539,7 @@ class WebIntegrationTest {
 		code(telemetry(other,List.of(telemetryEvent("CALL","PAGE_EXITED"),event)),404,"RESOURCE_NOT_FOUND");
 		event.put("callId",UUID.randomUUID());code(telemetry(owner,List.of(event)),404,"RESOURCE_NOT_FOUND");event.put("callId",call);
 		eventCounts(telemetry(owner,List.of(event)),1,0);status(end(owner,call),200);
-		var ended=telemetryEvent("CALL","LIVE_RESUME_SUCCEEDED");ended.put("callId",call);eventCounts(telemetry(owner,List.of(ended)),1,0);
+		var ended=telemetryEvent("CALL","PAGE_EXITED");ended.put("callId",call);eventCounts(telemetry(owner,List.of(ended)),1,0);
 		assertThat(send("GET","/api/v1/calls/"+call,null,owner,null).text("state")).isEqualTo("ENDED");
 	}
 	@Test void telemetryConcurrentIdenticalAndConflictingRequestsAreAtomic()throws Exception {
@@ -632,7 +592,7 @@ class WebIntegrationTest {
 	@Test void anonymousCookieAndStableCsrfArePrivate()throws Exception{
 		var first=send("GET","/api/v1/auth/session",null,null,null);status(first,200);String cookie=first.headers().firstValue("Set-Cookie").orElseThrow();
 		assertThat(cookie).contains("__Host-safecall-session=","Secure","HttpOnly","SameSite=Lax","Path=/").doesNotContain("Domain");
-		assertThat(first.body().properties()).hasSize(5);assertThat(first.text("kind")).isEqualTo("ANONYMOUS");
+		assertThat(first.body().properties()).hasSize(6);assertThat(first.body().path("profilePrefill").isNull()).isTrue();assertThat(first.text("kind")).isEqualTo("ANONYMOUS");
 		Browser b=bootstrap();var second=send("GET","/api/v1/auth/session",null,b,null);assertThat(second.text("csrfToken")).isEqualTo(b.csrf);assertThat(second.headers().allValues("Set-Cookie")).isEmpty();assertThat(count("appUser")).isZero();
 	}
 	@Test void bootstrapRejectsUnverifiableAndForeignOrigins()throws Exception{
@@ -650,6 +610,8 @@ class WebIntegrationTest {
 	@Test void oauthAuthenticatesWithoutConsentOrProfileWrites()throws Exception{
 		Browser b=bootstrap();String state=start(b,"LOGIN",false);assertThat(count("appUser")).isZero();verifyNoInteractions(kakao);
 		var r=callback(b,state);status(r,303);assertThat(r.headers().firstValue("Location")).contains("/onboarding/profile");cookie(b,r);
+		var session=send("GET","/api/v1/auth/session",null,b,null);cookie(b,session);assertThat(session.body().path("profilePrefill").path("name").asString()).isEqualTo("홍길동");
+		assertThat(session.body().path("profilePrefill").path("phone").asString()).isEqualTo("01012345678");assertThat(b.profilePrefillCookie).isNull();
 		assertThat(count("appUser")).isEqualTo(1);assertThat(count("consentEvent")).isZero();
 		var user=authRepository.user(userId(b),false);assertThat(user.status()).isEqualTo("ACTIVE");
 		assertThat(user.nameCipher()).isNull();assertThat(user.phoneCipher()).isNull();assertThat(user.genderCipher()).isNull();assertThat(user.birthDateCipher()).isNull();
@@ -714,23 +676,20 @@ class WebIntegrationTest {
 	@Test void contactsEnforceSlotsDuplicatesAndTargetScopedIdempotency()throws Exception{Browser b=member();UUID key=UUID.randomUUID();List<String> ids=new ArrayList<>();for(String phone:List.of("01011112222","01033334444")){var r=send("POST","/api/v1/me/emergency-contacts",Map.of("name","보호자","relationship","가족","phone",phone),b,UUID.randomUUID());status(r,201);assertThat(r.headers().firstValue("Location")).isPresent();ids.add(r.text("id"));}for(String id:ids)status(send("DELETE","/api/v1/me/emergency-contacts/"+id,Map.of("expectedVersion",1),b,key),204);status(send("DELETE","/api/v1/me/emergency-contacts/"+ids.getFirst(),Map.of("expectedVersion",1),b,key),204);status(send("DELETE","/api/v1/me/emergency-contacts/"+ids.getFirst(),Map.of("expectedVersion",1),b,UUID.randomUUID()),404);assertThat(count("emergencyContact")).isZero();}
 	@Test void settingsRequireIdempotencyAndExcludeVibration()throws Exception{Browser b=member();UUID key=UUID.randomUUID();var body=Map.of("incomingAlertMode","SILENT","expectedVersion",1);status(send("PATCH","/api/v1/me/settings",body,b,key),200);status(send("PATCH","/api/v1/me/settings",body,b,key),200);status(send("PATCH","/api/v1/me/settings",body,b,null),400);status(send("PATCH","/api/v1/me/settings",Map.of("incomingAlertMode","VIBRATE","expectedVersion",2),b,UUID.randomUUID()),422);}
 	@Test void homeReflectsActiveCallAndCatalogVersion()throws Exception{Browser b=member();complete(b);status(send("POST","/api/v1/me/emergency-contacts",Map.of("name","보호자","relationship","가족","phone","01011112222"),b,UUID.randomUUID()),201);assertThat(send("GET","/api/v1/home",null,b,null).body().path("isMessageComposeEligible").asBoolean()).isTrue();create(b);assertThat(send("GET","/api/v1/home",null,b,null).body().path("messageBlockReasons").toString()).contains("CALL_ALREADY_OPEN");assertThat(send("GET","/api/v1/call-options",null,b,null).body().path("catalogVersion").asInt()).isEqualTo(3);}
-	@Test void callCreationSnapshotsPolicyAndRequiresPageOwnership()throws Exception{Browser b=guest();UUID id=create(b);var r=send("GET","/api/v1/calls/"+id,null,b,null);status(r,200);assertThat(r.text("expiresAt")).isEqualTo(START.plusSeconds(600).toString());assertThat(r.text("leaseExpiresAt")).isEqualTo(START.plusSeconds(30).toString());assertThat(r.body().path("maxResumeAttempts").asInt()).isEqualTo(1);String page=b.page;b.page=crypto.randomToken();status(send("GET","/api/v1/calls/"+id,null,b,null),404);b.page=page;Browser other=guest();status(send("GET","/api/v1/calls/"+id,null,other,null),404);}
+	@Test void callCreationSnapshotsPolicyAndRequiresPageOwnership()throws Exception{Browser b=guest();UUID id=create(b);var r=send("GET","/api/v1/calls/"+id,null,b,null);status(r,200);assertThat(r.text("expiresAt")).isEqualTo(START.plusSeconds(600).toString());assertThat(r.text("leaseExpiresAt")).isEqualTo(START.plusSeconds(30).toString());assertThat(r.body().has("maxResumeAttempts")).isFalse();String page=b.page;b.page=crypto.randomToken();status(send("GET","/api/v1/calls/"+id,null,b,null),404);b.page=page;Browser other=guest();status(send("GET","/api/v1/calls/"+id,null,other,null),404);}
 	@Test void sameClientCallIsDeduplicatedButCannotMovePages()throws Exception{Browser b=guest();var body=createBody();var first=send("POST","/api/v1/calls",body,b,UUID.randomUUID());status(first,202);var next=send("POST","/api/v1/calls",body,b,UUID.randomUUID());status(next,202);assertThat(next.text("id")).isEqualTo(first.text("id"));b.page=crypto.randomToken();status(send("POST","/api/v1/calls",body,b,UUID.randomUUID()),404);assertThat(count("connectionGrant")).isEqualTo(1);}
 	@Test void duplicateCallKeysConflictOnDifferentBody()throws Exception{Browser b=guest();UUID key=UUID.randomUUID();status(send("POST","/api/v1/calls",createBody(),b,key),202);code(send("POST","/api/v1/calls",createBody(),b,key),409,"IDEMPOTENCY_CONFLICT");}
-	@Test void initialGrantIsIssuedOnceAndTokenKeyRemovedOnConnected()throws Exception{Browser b=guest();UUID id=create(b);status(connection(b,id),202);worker.runOne(id);worker.runOne(id);verify(gemini,times(1)).issue(any());var g=connection(b,id);status(g,200);assertThat(g.body().path("sessionResumption").path("isEnabled").asBoolean()).isTrue();String ref=jdbc.queryForObject("SELECT `keyRef` FROM `connectionGrant`",String.class);assertThat(java.nio.file.Files.exists(java.nio.file.Path.of(System.getenv("AUTH_TEST_KEY_DIRECTORY"),ref))).isTrue();status(event(b,id,"CONNECTED",g.text("grantId")),200);assertThat(jdbc.queryForObject("SELECT `tokenCipher` FROM `connectionGrant`",byte[].class)).isNull();discardQueue.run();assertThat(java.nio.file.Files.exists(java.nio.file.Path.of(System.getenv("AUTH_TEST_KEY_DIRECTORY"),ref))).isFalse();code(connection(b,id),409,"CONNECTION_ALREADY_USED");}
-	@Test void invalidTransitionAndEventReplayDoNotCorruptVersion()throws Exception{Browser b=guest();UUID id=create(b);code(event(b,id,"ANSWERED",null),409,"CALL_TRANSITION_INVALID");worker.runOne(id);String grant=connection(b,id).text("grantId");var body=eventBody(b,id,"CONNECTED",grant);UUID key=UUID.randomUUID();status(send("POST","/api/v1/calls/"+id+"/events",body,b,key),200);status(send("POST","/api/v1/calls/"+id+"/events",body,b,UUID.randomUUID()),200);assertThat(send("GET","/api/v1/calls/"+id,null,b,null).body().path("version").asLong()).isEqualTo(3);body.put("type","RESUMED");code(send("POST","/api/v1/calls/"+id+"/events",body,b,key),409,"IDEMPOTENCY_CONFLICT");}
+	@Test void initialGrantIsIssuedOnceAndTokenKeyRemovedOnConnected()throws Exception{Browser b=guest();UUID id=create(b);status(connection(b,id),202);worker.runOne(id);worker.runOne(id);verify(gemini,times(1)).issue(any());var g=connection(b,id);status(g,200);assertThat(g.body().has("sessionResumption")).isFalse();String ref=jdbc.queryForObject("SELECT `keyRef` FROM `connectionGrant`",String.class);assertThat(java.nio.file.Files.exists(java.nio.file.Path.of(System.getenv("AUTH_TEST_KEY_DIRECTORY"),ref))).isTrue();status(event(b,id,"CONNECTED",g.text("grantId")),200);assertThat(jdbc.queryForObject("SELECT `tokenCipher` FROM `connectionGrant`",byte[].class)).isNull();discardQueue.run();assertThat(java.nio.file.Files.exists(java.nio.file.Path.of(System.getenv("AUTH_TEST_KEY_DIRECTORY"),ref))).isFalse();code(connection(b,id),409,"CONNECTION_ALREADY_USED");}
+	@Test void invalidTransitionAndEventReplayDoNotCorruptVersion()throws Exception{Browser b=guest();UUID id=create(b);code(event(b,id,"ANSWERED",null),409,"CALL_TRANSITION_INVALID");worker.runOne(id);String grant=connection(b,id).text("grantId");var body=eventBody(b,id,"CONNECTED",grant);UUID key=UUID.randomUUID();status(send("POST","/api/v1/calls/"+id+"/events",body,b,key),200);status(send("POST","/api/v1/calls/"+id+"/events",body,b,UUID.randomUUID()),200);assertThat(send("GET","/api/v1/calls/"+id,null,b,null).body().path("version").asLong()).isEqualTo(3);body.put("type","RINGING_SHOWN");code(send("POST","/api/v1/calls/"+id+"/events",body,b,key),409,"IDEMPOTENCY_CONFLICT");}
 	@Test void heartbeatCannotReviveExpiredLease()throws Exception{Browser b=guest();UUID id=create(b);active(b,id);clock.advance(30);code(send("POST","/api/v1/calls/"+id+"/heartbeat",Map.of(),b,null),409,"CALL_TERMINAL");assertThat(send("GET","/api/v1/calls/"+id,null,b,null).text("endReason")).isEqualTo("SESSION_EXPIRED");}
 	@Test void heartbeatUpdatesLeaseWithoutExtendingDurationOrVersion()throws Exception{Browser b=guest();UUID id=create(b);active(b,id);var before=send("GET","/api/v1/calls/"+id,null,b,null);clock.advance(5);var beat=send("POST","/api/v1/calls/"+id+"/heartbeat",Map.of(),b,null);status(beat,200);assertThat(beat.text("leaseExpiresAt")).isEqualTo(START.plusSeconds(35).toString());var after=send("GET","/api/v1/calls/"+id,null,b,null);assertThat(after.text("expiresAt")).isEqualTo(before.text("expiresAt"));assertThat(after.body().path("version")).isEqualTo(before.body().path("version"));}
 	@Test void callEndIsTerminalAndUsesWebReason()throws Exception{Browser b=guest();UUID id=create(b);worker.runOne(id);status(end(b,id),200);var again=end(b,id);status(again,200);assertThat(again.text("endReason")).isEqualTo("TAB_HIDDEN");assertThat(jdbc.queryForObject("SELECT `status` FROM `connectionGrant`",String.class)).isEqualTo("INVALIDATED");}
-	@Test void resumeCreatesOneGenerationKeepsActiveAndRejectsStaleCallbacks()throws Exception{Browser b=guest();UUID id=create(b);String initial=active(b,id);UUID key=UUID.randomUUID();var renewal=renew(b,id,initial,key);status(renewal,202);assertThat(renew(b,id,initial,key).text("grantId")).isEqualTo(renewal.text("grantId"));code(renew(b,id,initial,UUID.randomUUID()),409,"RENEWAL_ALREADY_REQUESTED");worker.runOne(id);var resumed=connection(b,id);status(resumed,200);assertThat(resumed.text("purpose")).isEqualTo("RESUME");code(event(b,id,"CONNECTED",initial),409,"STALE_CONNECTION_GENERATION");status(event(b,id,"RESUMED",resumed.text("grantId")),200);code(renew(b,id,resumed.text("grantId"),UUID.randomUUID()),409,"RESUME_BUDGET_EXHAUSTED");assertThat(count("connectionGrant")).isEqualTo(2);assertThat(send("GET","/api/v1/calls/"+id,null,b,null).text("state")).isEqualTo("ACTIVE");}
-	@Test void resumeDoesNotRecomposeChangedProfileOrAcceptHandle()throws Exception{Browser b=guest();UUID id=create(b);String initial=active(b,id);status(send("POST","/api/v1/calls/"+id+"/connection-renewals",Map.of("previousGrantId",initial,"reason","GO_AWAY","isResumable",true,"handle","secret"),b,UUID.randomUUID()),400);status(renew(b,id,initial,UUID.randomUUID()),202);var request=calls.claim(id);assertThat(request.instruction()).contains("safety","도구를 호출하지 않는다");assertThat(request.purpose()).isEqualTo("RESUME");}
-	@Test void resumeIssueUnknownClosesAsResumptionFailed()throws Exception{Browser b=guest();UUID id=create(b);String initial=active(b,id);status(renew(b,id,initial,UUID.randomUUID()),202);when(gemini.issue(any())).thenThrow(new GeminiClient.IssueException(true));worker.runOne(id);var r=send("GET","/api/v1/calls/"+id,null,b,null);assertThat(r.text("state")).isEqualTo("FAILED");assertThat(r.text("endReason")).isEqualTo("RESUMPTION_FAILED");code(connection(b,id),503,"CONNECTION_ISSUE_UNKNOWN");}
 	@Test void stalledIssueTimesOutAtTenSecondsAndNeverReissues()throws Exception{Browser b=guest();UUID id=create(b);assertThat(calls.claim(id)).isNotNull();clock.advance(10);worker.runOne(id);code(connection(b,id),503,"CONNECTION_ISSUE_UNKNOWN");verify(gemini,never()).issue(any());}
 	@Test void workerDiscardsLateResponseAfterEnd()throws Exception{Browser b=guest();UUID id=create(b);var request=calls.claim(id);status(end(b,id),200);calls.finish(id,request,"auth_tokens/late",null);assertThat(jdbc.queryForObject("SELECT `tokenCipher` FROM `connectionGrant`",byte[].class)).isNull();assertThat(connection(b,id).status()).isEqualTo(409);}
 	@Test void concurrentSameCreateIsSingleCall()throws Exception{Browser b=guest();var body=createBody();UUID key=UUID.randomUUID();try(var executor=Executors.newFixedThreadPool(2)){var a=executor.submit(()->send("POST","/api/v1/calls",body,b,key));var c=executor.submit(()->send("POST","/api/v1/calls",body,b,key));status(a.get(),202);status(c.get(),202);}assertThat(count("callSession")).isEqualTo(1);}
 	@Test void concurrentContactCreatesEnforceTwoSlots()throws Exception{Browser b=member();try(var executor=Executors.newFixedThreadPool(3)){List<Future<Result>> results=new ArrayList<>();for(String phone:List.of("01011112222","01033334444","01055556666"))results.add(executor.submit(()->send("POST","/api/v1/me/emergency-contacts",Map.of("name","보호자","relationship","가족","phone",phone),b,UUID.randomUUID())));List<Integer> statuses=new ArrayList<>();for(var f:results)statuses.add(f.get().status());assertThat(statuses).containsExactlyInAnyOrder(201,201,409);}assertThat(count("emergencyContact")).isEqualTo(2);}
 	@Test void unknownJsonAndDuplicateKeysAreRejectedWithoutLeakingValues()throws Exception{Browser b=bootstrap();var r=raw("POST","/api/v1/auth/guest","{\"secret\":\"sensitive\",\"secret\":\"sensitive\"}",b,null,ORIGIN,b.csrf,null);status(r,400);assertThat(r.body().toString()).doesNotContain("sensitive");assertThat(r.text("timestamp")).endsWith("Z");}
-	@Test void openApiExposesOnlyImplementedWebOperations()throws Exception{var r=send("GET","/v3/api-docs",null,null,null);status(r,200);var paths=r.body().path("paths");assertThat(r.body().path("servers").path(0).path("url").asString()).isEqualTo("/");assertThat(paths.has("/api/v1/auth/refresh")).isFalse();assertThat(paths.has("/api/v1/documents/{code}")).isFalse();assertThat(paths.has("/api/v1/onboarding")).isFalse();assertThat(paths.has("/api/v1/onboarding/advance")).isFalse();assertThat(r.body().path("components").path("schemas").path("AuthorizationRequest").path("properties").has("decisions")).isFalse();assertThat(paths.has("/api/v1/calls/{callId}/connection-renewals")).isTrue();assertThat(paths.path("/api/v1/me/profile").has("patch")).isTrue();assertThat(r.body().path("components").path("securitySchemes").path("webSession").path("in").asString()).isEqualTo("cookie");}
+	@Test void openApiExposesOnlyImplementedWebOperations()throws Exception{var r=send("GET","/v3/api-docs",null,null,null);status(r,200);var paths=r.body().path("paths");assertThat(r.body().path("servers").path(0).path("url").asString()).isEqualTo("/");assertThat(paths.has("/api/v1/auth/refresh")).isFalse();assertThat(paths.has("/api/v1/documents/{code}")).isFalse();assertThat(paths.has("/api/v1/onboarding")).isFalse();assertThat(paths.has("/api/v1/onboarding/advance")).isFalse();assertThat(r.body().path("components").path("schemas").path("AuthorizationRequest").path("properties").has("decisions")).isFalse();assertThat(paths.has("/api/v1/calls/{callId}/connection-renewals")).isFalse();assertThat(paths.path("/api/v1/me/profile").has("patch")).isTrue();assertThat(r.body().path("components").path("securitySchemes").path("webSession").path("in").asString()).isEqualTo("cookie");}
 
 	@Test void deletionViewIncludesAllSevenFieldsAndReplaysCurrentStatus()throws Exception{
 		Browser b=member();UUID key=UUID.randomUUID();var result=send("POST","/api/v1/me/consents/LOCATION_PROCESSING/withdrawal",Map.of(),b,key);status(result,202);
@@ -763,12 +722,6 @@ class WebIntegrationTest {
 	}
 	@Test void maximumDurationWinsOverARecentHeartbeat()throws Exception{
 		Browser b=guest();UUID id=create(b);active(b,id);jdbc.update("UPDATE `callSession` SET `lastHeartbeatAt`=?,`leaseExpiresAt`=? WHERE `id`=?",time(START.plusSeconds(599)),time(START.plusSeconds(600)),bin(id));clock.advance(600);code(send("POST","/api/v1/calls/"+id+"/heartbeat",Map.of(),b,null),409,"CALL_TERMINAL");assertThat(send("GET","/api/v1/calls/"+id,null,b,null).text("endReason")).isEqualTo("DURATION_LIMIT");
-	}
-	@Test void retiredPromptReleaseStaysPinnedDuringResume()throws Exception{
-		Browser b=guest();UUID id=create(b);String initial=active(b,id);jdbc.update("UPDATE `promptRelease` SET `status`='RETIRED'");status(renew(b,id,initial,UUID.randomUUID()),202);worker.runOne(id);status(connection(b,id),200);assertThat(connection(b,id).text("model")).isEqualTo("models/synthetic-live");
-	}
-	@Test void parallelRenewalsConsumeAtMostOneBudget()throws Exception{
-		Browser b=guest();UUID id=create(b);String initial=active(b,id);try(var executor=Executors.newFixedThreadPool(2)){var a=executor.submit(()->renew(b,id,initial,UUID.randomUUID()));var c=executor.submit(()->renew(b,id,initial,UUID.randomUUID()));assertThat(List.of(a.get().status(),c.get().status())).containsExactlyInAnyOrder(202,409);}assertThat(count("connectionGrant")).isEqualTo(2);
 	}
 	@Test void callLimitsReturnRetryAfterAndDoNotCountIdempotentReplay()throws Exception{
 		Browser b=guest();for(int i=0;i<5;i++){var body=createBody();UUID key=UUID.randomUUID();var r=send("POST","/api/v1/calls",body,b,key);status(r,202);status(send("POST","/api/v1/calls",body,b,key),202);end(b,UUID.fromString(r.text("id")));}var limited=send("POST","/api/v1/calls",createBody(),b,UUID.randomUUID());code(limited,429,"RATE_LIMITED");assertThat(limited.headers().firstValue("Retry-After")).contains("60");
@@ -823,13 +776,10 @@ class WebIntegrationTest {
 		Browser b=guest();UUID call=create(b);active(b,call);clock.advance(30);worker.tick();
 		assertThat(jdbc.queryForObject("SELECT `state` FROM `callSession` WHERE `id`=?",String.class,bin(call))).isEqualTo("ENDED");
 	}
-	@Test void renewalReplayCannotReviveAnEndedCall()throws Exception{
-		Browser b=guest();UUID call=create(b);String grant=active(b,call);UUID key=UUID.randomUUID();status(renew(b,call,grant,key),202);end(b,call);code(renew(b,call,grant,key),409,"CALL_TERMINAL");
-	}
 	@Test void finalSchemaHasExpectedTablesColumnsAndConstraints(){
 		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(18);
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(181);
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(155);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(177);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(152);
 	}
 	@Test void aiWithdrawalMasksDemographicsBeforeWorkerAndDoesNotBlockLocationConsent()throws Exception{
 		Browser b=member();status(send("POST","/api/v1/me/consents/AI_CALL/withdrawal",Map.of(),b,UUID.randomUUID()),202);

@@ -7,7 +7,7 @@
 -- camelCase 식별자는 백틱 인용. Boolean은 is 접두사와 0/1 CHECK.
 -- Cipher는 애플리케이션 인증 암호화, Hash는 용도 분리 HMAC-SHA-256, keyRef는 외부 키 참조.
 -- 브라우저 React SPA: 보안 쿠키, Gemini 직접 WSS, 웹 내부 메시지 작성, SOS 안내만.
--- 원음/대화/완성 프롬프트/좌표/위치 URL/메시지 본문/세션 재개 핸들 영속 저장 없음.
+-- 원음/대화/완성 프롬프트/좌표/위치 URL/메시지 본문 영속 저장 없음.
 -- 세션 쿠키·CSRF 원문은 저장하지 않는다. 단기 Gemini 토큰만 짧은 재조회용 암호문 허용.
 -- API_명세_최종.md, DB_논리_설계_최종.md, 변경_대응표_최종.md와 함께 적용한다.
 
@@ -197,13 +197,9 @@ CREATE TABLE `personaPrompt` (
 ) ENGINE=InnoDB COMMENT='페르소나 프롬프트: release마다 4×3=12행. 각 조합 유일. release 발행 후 수정 금지';
 
 CREATE TABLE `callSession` (
-	`promptPreparedAt` DATETIME(6) NULL COMMENT '최초 지침 조립의 기준 시각; 재개 시 나이 계산 고정',
-	`promptInstructionHash` VARBINARY(32) NULL COMMENT '통화별 용도 분리 HMAC; 프롬프트 원문 저장 금지',
-	CONSTRAINT `ckCallPromptAnchor` CHECK ((`promptPreparedAt` IS NULL)=(`promptInstructionHash` IS NULL)),
-	CONSTRAINT `ckCallPromptHash` CHECK (`promptInstructionHash` IS NULL OR OCTET_LENGTH(`promptInstructionHash`)=32),
 	`id` BINARY(16) NOT NULL COMMENT '서버가 생성한 UUID 식별자',
 	`sessionId` BINARY(16) NOT NULL COMMENT '소유 웹 세션 식별자',
-	`pageKeyHash` VARBINARY(32) NOT NULL COMMENT '현재 페이지 메모리 전용 소유 키 HMAC; 새로고침 후 재개 차단',
+	`pageKeyHash` VARBINARY(32) NOT NULL COMMENT '현재 페이지 메모리 전용 소유 키 HMAC; 새로고침 후 이전 통화 접근 차단',
 	`clientCallId` BINARY(16) NOT NULL COMMENT '사용자 시작 행동 UUID; 동일 세션 내 중복 생성 방지',
 	`startMode` VARCHAR(8) NOT NULL DEFAULT 'STANDARD' COMMENT 'STANDARD/QUICK; QUICK은 FATHER 고정',
 	`releaseId` BINARY(16) NOT NULL COMMENT '통화에 적용한 프롬프트 배포 버전 식별자',
@@ -221,14 +217,12 @@ CREATE TABLE `callSession` (
 	`leaseExpiresAt` DATETIME(6) NOT NULL COMMENT '마지막 유효 heartbeat 기준 잔여 세션 정리 기한',
 	`expiresAt` DATETIME(6) NOT NULL COMMENT '생성 시 확정한 최대 통화 종료 기한; 기본 600초/세션/모델 한도 중 최솟값',
 	`policyVersion` VARCHAR(32) NOT NULL DEFAULT 'mvp-2026-09-11' COMMENT '통화 생성 시 적용한 공개 운영 정책 버전',
-	`maxResumeAttempts` INT NOT NULL DEFAULT 1 COMMENT '통화 전체 재개 시도 예산; 발급 요청 수락 시 소비하며 성공해도 복원하지 않음',
-	`resumeDelayMs` INT NOT NULL DEFAULT 1000 COMMENT '자동 재개 전 대기 밀리초; GoAway는 남은 기한 안에서 조정',
 	`version` BIGINT NOT NULL DEFAULT 1 COMMENT '낙관적 잠금 버전; 변경 성공 시 1 증가',
 	`activeMarker` TINYINT GENERATED ALWAYS AS (CASE WHEN `state` IN ('CREATED','PREPARING','RINGING','ACTIVE') THEN 1 ELSE NULL END) STORED COMMENT '조건을 만족하는 행은 1, 그 외 NULL; 조건부 유일성을 강제하는 DB 생성 컬럼. API 입력/수정 금지',
 	PRIMARY KEY(`id`),
 	CONSTRAINT `fkCallSession1` FOREIGN KEY(`sessionId`) REFERENCES `webSession`(`id`) ON DELETE CASCADE,
 	CONSTRAINT `ckCallSession1` CHECK (`state` IN ('CREATED','PREPARING','RINGING','ACTIVE','ENDED','FAILED')),
-	CONSTRAINT `ckCallSession2` CHECK (`endReason` IN ('USER_ENDED','DECLINED','BACK_NAVIGATION','TAB_HIDDEN','PAGE_EXIT','PAGE_RELOAD','SWITCH_TO_FALLBACK','CONNECTION_FAILED','RINGING_FAILED', 'MICROPHONE_FAILED','AUDIO_FAILED','CONNECTION_LOST','RESUMPTION_FAILED','SESSION_EXPIRED','DURATION_LIMIT', 'LOGOUT','CONSENT_WITHDRAWN','DATA_DELETION')),
+	CONSTRAINT `ckCallSession2` CHECK (`endReason` IN ('USER_ENDED','DECLINED','BACK_NAVIGATION','TAB_HIDDEN','PAGE_EXIT','PAGE_RELOAD','SWITCH_TO_FALLBACK','CONNECTION_FAILED','RINGING_FAILED', 'MICROPHONE_FAILED','AUDIO_FAILED','CONNECTION_LOST','SESSION_EXPIRED','DURATION_LIMIT', 'LOGOUT','CONSENT_WITHDRAWN','DATA_DELETION')),
 	CONSTRAINT `ckCallSession3` CHECK (`isDemographicApplied` IN (0,1)),
 	CONSTRAINT `ckCallSession4` CHECK (`isGenderAddressApplied` IN (0,1)),
 	CONSTRAINT `ckCallSession5` CHECK (`version`>0),
@@ -248,12 +242,11 @@ CREATE TABLE `callSession` (
 	CONSTRAINT `ckCallStartMode` CHECK (`startMode` IN ('STANDARD','QUICK')),
 	CONSTRAINT `ckQuickFather` CHECK (`startMode`<>'QUICK' OR `counterpartCode`='FATHER'),
 	CONSTRAINT `ckCallPageKey` CHECK (octet_length(`pageKeyHash`)=32),
-	CONSTRAINT `ckCallResumePolicy` CHECK (`maxResumeAttempts`>=0 AND `resumeDelayMs`>=0),
 	CONSTRAINT `ckCallLease` CHECK (`leaseExpiresAt`>`lastHeartbeatAt` AND `lastHeartbeatAt`>=`createdAt`),
 	CONSTRAINT `ckCallRingingTime` CHECK (`ringingAt` IS NULL OR `ringingAt`>=`createdAt`),
 	CONSTRAINT `ckCallEndTime` CHECK (`endedAt` IS NULL OR ((`ringingAt` IS NULL OR `endedAt`>=`ringingAt`) AND (`answeredAt` IS NULL OR `endedAt`>=`answeredAt`))),
 	INDEX `ixCallLease` (`state`,`leaseExpiresAt`)
-) ENGINE=InnoDB COMMENT='통화 세션: 세션별 미종료 통화 최대1. 종료 상태와 종료 시각·사유는 함께 존재. 게스트는 isDemographicApplied/isGenderAddressApplied=false 재개 성공 시 기존 ACTIVE 유지; 종료 사유는 웹 생명주기 기준';
+) ENGINE=InnoDB COMMENT='통화 세션: 세션별 미종료 통화 최대1. 종료 상태와 종료 시각·사유는 함께 존재. 게스트는 isDemographicApplied/isGenderAddressApplied=false; 종료 사유는 웹 생명주기 기준';
 
 CREATE TABLE `callEvent` (
 	`id` BINARY(16) NOT NULL COMMENT '서버가 생성한 UUID 식별자',
@@ -268,18 +261,18 @@ CREATE TABLE `callEvent` (
 	PRIMARY KEY(`id`),
 	CONSTRAINT `fkCallEvent1` FOREIGN KEY(`callId`) REFERENCES `callSession`(`id`) ON DELETE CASCADE,
 	CONSTRAINT `ckCallEvent1` CHECK (`sequence`>0),
-	CONSTRAINT `ckCallEvent2` CHECK (`eventType` IN ('CREATED','PREPARING','CONNECTED','RINGING_SHOWN', 'ANSWERED','CONNECTION_INTERRUPTED','GO_AWAY','RESUME_REQUESTED','RESUMED','ENDED','FAILED')),
+	CONSTRAINT `ckCallEvent2` CHECK (`eventType` IN ('CREATED','PREPARING','CONNECTED','RINGING_SHOWN','ANSWERED','ENDED','FAILED')),
 	CONSTRAINT `ckCallEvent3` CHECK (`stateAfter` IN ('CREATED','PREPARING','RINGING','ACTIVE','ENDED','FAILED')),
 	CONSTRAINT `uqCallEvent1` UNIQUE(`callId`,`sequence`),
 	CONSTRAINT `uqCallEvent2` UNIQUE(`callId`,`eventKey`),
 	CONSTRAINT `ckCallEventHash` CHECK (octet_length(`requestHash`)=32)
-) ENGINE=InnoDB COMMENT='통화 사건: call+sequence 유일, call+eventKey 유일. 원음·텍스트 대화 없음 연결 교체 사건은 통화 상태와 별도 기록';
+) ENGINE=InnoDB COMMENT='통화 사건: call+sequence 유일, call+eventKey 유일. 원음·텍스트 대화 없음';
 
 CREATE TABLE `connectionGrant` (
 	`id` BINARY(16) NOT NULL COMMENT '발급 세대별 UUID',
 	`callId` BINARY(16) NOT NULL COMMENT '연결된 AI 통화 ID',
 	`generation` INT NOT NULL COMMENT '통화 내 1부터 증가하는 발급 세대',
-	`purpose` VARCHAR(7) NOT NULL COMMENT 'INITIAL 또는 RESUME; 재개 핸들은 저장하지 않음',
+	`purpose` VARCHAR(7) NOT NULL COMMENT '최초 연결 발급 INITIAL',
 	`keyRef` TEXT COMMENT 'READY 토큰 암호화의 외부 임시 키 참조',
 	`status` VARCHAR(12) NOT NULL COMMENT '처리/활성 상태; 허용값과 연관 조건은 아래 CHECK 참조',
 	`createdAt` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '발급 작업 대기 시작 시각',
@@ -302,11 +295,11 @@ CREATE TABLE `connectionGrant` (
 	CONSTRAINT `uqGrantGeneration` UNIQUE (`callId`,`generation`),
 	CONSTRAINT `uqGrantOpen` UNIQUE (`callId`,`openMarker`),
 	CONSTRAINT `uqGrantInitial` UNIQUE (`callId`,`initialMarker`),
-	CONSTRAINT `ckGrantGeneration` CHECK (`generation`>0 AND ((`purpose`='INITIAL' AND `generation`=1) OR (`purpose`='RESUME' AND `generation`>1))),
+	CONSTRAINT `ckGrantGeneration` CHECK (`purpose`='INITIAL' AND `generation`=1),
 	CONSTRAINT `ckGrantCipher` CHECK ((`status`='READY')=(`tokenCipher` IS NOT NULL)),
 	CONSTRAINT `ckGrantKey` CHECK ((`tokenCipher` IS NULL)=(`keyRef` IS NULL)),
 	INDEX `ixGrantExpiry` (`status`,`newSessionExpiresAt`)
-) ENGINE=InnoDB COMMENT='통화 1:N 발급 세대. INITIAL 한 개, RESUME 여러 개; 진행 발급 한 개. 핸들은 브라우저 메모리 전용';
+) ENGINE=InnoDB COMMENT='통화별 최초 연결 정보 한 개';
 
 CREATE TABLE `apiIdempotency` (
 	`id` BINARY(16) NOT NULL COMMENT '서버가 생성한 UUID 식별자',
@@ -375,7 +368,7 @@ CREATE TABLE `operationEvent` (
 	INDEX `ixOperationTime` (`recordedAt`),
 	INDEX `ixOperationCall` (`callId`),
 	CONSTRAINT `fkOperationCallOwner` FOREIGN KEY (`callId`,`sessionId`) REFERENCES `callSession` (`id`,`sessionId`) ON DELETE CASCADE,
-	CONSTRAINT `ckOperationCode` CHECK (`code` IN ('AUTH_SUCCEEDED','MICROPHONE_PERMISSION_REVIEWED','LOCATION_PERMISSION_REVIEWED','LIVE_CONNECT_STARTED','LIVE_CONNECT_SUCCEEDED','LIVE_CONNECT_FAILED','RINGING_SHOWN','RINGING_FAILED','FIRST_AUDIO_PLAYED','AUDIO_INTERRUPTED','PAGE_EXITED','QUICK_START_SELECTED','QUICK_START_CANCELLED','LOCATION_AVAILABLE','LOCATION_UNAVAILABLE','COMPOSER_OPENED','COMPOSER_OPEN_FAILED','SOS_GUIDE_VIEWED','SOS_GUIDE_FAILED','FALLBACK_STARTED','FALLBACK_ENDED','LIVE_RESUME_STARTED','LIVE_RESUME_SUCCEEDED','LIVE_RESUME_FAILED','PERMISSION_QUERY_UNAVAILABLE','PAGE_RELOADED'))
+	CONSTRAINT `ckOperationCode` CHECK (`code` IN ('AUTH_SUCCEEDED','MICROPHONE_PERMISSION_REVIEWED','LOCATION_PERMISSION_REVIEWED','LIVE_CONNECT_STARTED','LIVE_CONNECT_SUCCEEDED','LIVE_CONNECT_FAILED','RINGING_SHOWN','RINGING_FAILED','FIRST_AUDIO_PLAYED','AUDIO_INTERRUPTED','PAGE_EXITED','QUICK_START_SELECTED','QUICK_START_CANCELLED','LOCATION_AVAILABLE','LOCATION_UNAVAILABLE','COMPOSER_OPENED','COMPOSER_OPEN_FAILED','SOS_GUIDE_VIEWED','SOS_GUIDE_FAILED','FALLBACK_STARTED','FALLBACK_ENDED','PERMISSION_QUERY_UNAVAILABLE','PAGE_RELOADED'))
 ) ENGINE=InnoDB COMMENT='운영 사건: 임의 JSON·음성·대화·번호·위치·토큰 필드 없음. 클라이언트 report를 인증 사실로 사용하지 않음 userId 중복 저장 없이 webSession에서 소유자 도출';
 
 CREATE TABLE `deletionJob` (
@@ -428,7 +421,7 @@ COMMIT;
 -- 동의·안내 문구는 프론트엔드 정적 콘텐츠다. promptRelease/personaPrompt는 검수된 모델·음성으로 별도 발행.
 -- 발행 서비스가 정확히 12개 페르소나와 안전성 검증을 확인한다.
 -- 잠금 순서: appUser → webSession → callSession → connectionGrant. 외부 호출 중 DB 잠금 금지.
--- 종료 상태 되돌리기 금지, 재개 세대/만료/권한/동의는 API 및 서비스 트랜잭션에서 검증.
+-- 종료 상태 되돌리기 금지, 연결 정보 만료/권한/동의는 API 및 서비스 트랜잭션에서 검증.
 -- 직접 Gemini WSS 해제를 Spring 서버가 관측한다고 가정하지 않는다. heartbeat lease로 정리.
 -- 삭제 순서: webSession(CASCADE 통화/발급/사건/멱등) → appUser(CASCADE 연락망/동의/설정).
 -- operationEvent는 webSession에서 회원을 도출한다. deletionJob.userId는 SET NULL.

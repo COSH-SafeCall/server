@@ -29,13 +29,12 @@ WHERE table_schema = 'safecall';
 **앱 업데이트 전에** 대상 DB를 선택하고 아직 적용하지 않은 마이그레이션을 아래 순서로 한 번씩 적용한다.
 
 1. [키 폐기 작업](../db/migrations/20260913-key-discard-job.sql): `keyDiscardJob` 추가.
-2. [통화 재개 검증 정보](../db/migrations/20260914-call-prompt-anchor.sql): 최초 지침 기준 시각과 설정 HMAC 추가.
-3. [발급 시작 시각](../db/migrations/20260914-grant-issuing-start.sql): `issuingStartedAt` 추가.
-4. [계정 외부 정리 재시도](../db/migrations/20260914-account-external-retry.sql): `externalNextAttemptAt`과 대상 조회 인덱스 추가.
-5. [정적 서비스 문서 전환](../db/migrations/20260915-static-service-documents.sql): 문서 외래 키와 `serviceDocument`를 제거하고 동의 버전을 1로 고정.
-6. [20260915-client-onboarding.sql](../db/migrations/20260915-client-onboarding.sql): OAuth 동의 스냅샷·서버 화면 단계 제거. [배포 순서와 연동 계약](frontend-onboarding.md#기존-db-적용)을 따른다.
+2. [발급 시작 시각](../db/migrations/20260914-grant-issuing-start.sql): `issuingStartedAt` 추가.
+3. [계정 외부 정리 재시도](../db/migrations/20260914-account-external-retry.sql): `externalNextAttemptAt`과 대상 조회 인덱스 추가.
+4. [정적 서비스 문서 전환](../db/migrations/20260915-static-service-documents.sql): 문서 외래 키와 `serviceDocument`를 제거하고 동의 버전을 1로 고정.
+5. [20260915-client-onboarding.sql](../db/migrations/20260915-client-onboarding.sql): OAuth 동의 스냅샷·서버 화면 단계 제거. [배포 순서와 연동 계약](frontend-onboarding.md#기존-db-적용)을 따른다.
 
-기존 통화에 임의 HMAC·발급 시작 시각을 채우지 않는다. 검증 정보 없는 통화는 재개 시 종료되며, 시작 시각 없는 ISSUING은 UNKNOWN으로 종료된다. 진행 중 통화가 끝난 뒤 앱을 교체한다. 기존 ACCOUNT 작업의 암호화된 선점 기한은 새 워커가 확인하여 유지한다. `externalNextAttemptAt`은 내부 재시도 시각이며 API의 완료 목표 기한 `dueAt`을 변경하지 않는다.
+기존 통화의 발급 시작 시각을 임의로 채우지 않는다. 시작 시각 없는 ISSUING은 UNKNOWN으로 종료된다. 진행 중 통화가 끝난 뒤 서버를 교체한다. 기존 ACCOUNT 작업의 암호화된 선점 기한은 새 워커가 확인하여 유지한다. `externalNextAttemptAt`은 내부 재시도 시각이며 API의 완료 목표 기한 `dueAt`을 변경하지 않는다.
 
 DDL은 ALTER/데이터 이관 스크립트가 아니며 CREATE DATABASE 실패에서 중단해야 한다. `--force`로 계속 실행하거나 기존 DB를 자동 삭제하지 않는다. 20260913~20260914의 앞선 네 마이그레이션보다 오래된 중간 버전은 세션·멱등 기록·암호화 키 매핑을 포함한 별도 이관 검토가 필요하다. 과거 버전에서 이미 DB 참조를 잃은 외부 키는 이 마이그레이션만으로 복구되지 않으므로 별도 대조한다.
 

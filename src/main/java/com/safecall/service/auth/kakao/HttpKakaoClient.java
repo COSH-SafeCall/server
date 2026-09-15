@@ -6,6 +6,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.LocalDate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -39,7 +40,31 @@ public class HttpKakaoClient implements KakaoClient {
 		if (!user.path("id").isIntegralNumber() || user.path("id").asLong() != info.path("id").asLong()) {
 			throw new CustomException(ErrorCode.KAKAO_TOKEN_INVALID);
 		}
-		return new KakaoIdentity(info.path("id").asString(), null, null, null, null);
+		JsonNode account=user.path("kakao_account");
+		return new KakaoIdentity(info.path("id").asString(), text(account,"name","name_needs_agreement"),
+			gender(account),birthDate(account),phone(account));
+	}
+	private String text(JsonNode account,String field,String agreementField) {
+		if(account.path(agreementField).asBoolean(false)||!account.path(field).isString())return null;
+		String value=account.path(field).asString().trim();return value.isEmpty()?null:value;
+	}
+	private String gender(JsonNode account) {
+		String value=text(account,"gender","gender_needs_agreement");
+		return "male".equals(value)?"MALE":"female".equals(value)?"FEMALE":null;
+	}
+	private LocalDate birthDate(JsonNode account) {
+		if(account.path("birthyear_needs_agreement").asBoolean(false)||account.path("birthday_needs_agreement").asBoolean(false)
+			||!"SOLAR".equals(account.path("birthday_type").asString()))return null;
+		String year=account.path("birthyear").asString(),birthday=account.path("birthday").asString();
+		if(!year.matches("[0-9]{4}")||!birthday.matches("[0-9]{4}"))return null;
+		try {var value=LocalDate.of(Integer.parseInt(year),Integer.parseInt(birthday.substring(0,2)),Integer.parseInt(birthday.substring(2)));
+			return value.isAfter(LocalDate.now(clock))?null:value;
+		} catch(RuntimeException exception) {return null;}
+	}
+	private String phone(JsonNode account) {
+		String value=text(account,"phone_number","phone_number_needs_agreement");if(value==null)return null;
+		String digits=value.replaceAll("[^0-9]","");if(value.trim().startsWith("+82")&&digits.startsWith("82"))digits="0"+digits.substring(2);
+		return digits.matches("010[0-9]{8}")?digits:null;
 	}
 
 	private JsonNode get(String path, String accessToken) {

@@ -14,8 +14,6 @@ public enum ErrorCode {
 	INVALID_ALERT_MODE(422,"지원하지 않는 알림 모드입니다."),
 	BUSINESS_VALIDATION_FAILED(422,"입력값을 확인해 주세요."),
 	STALE_CONNECTION_GENERATION(409,"이전 연결 세대입니다."),
-	RESUME_BUDGET_EXHAUSTED(409,"통화 재개 횟수를 모두 사용했습니다."),
-	RENEWAL_ALREADY_REQUESTED(409,"이미 연결 재개를 요청했습니다."),
 	GEMINI_VALIDATION_REQUIRED(503,"Gemini 연결 설정 검수가 필요합니다."),
 	MICROPHONE_REQUIRED(403, "마이크 권한이 필요합니다."),
 	CALL_ALREADY_OPEN(409, "이미 진행 중인 통화가 있습니다."),

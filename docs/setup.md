@@ -50,13 +50,11 @@ origin을 바꾸면 redirect URI도 함께 설정한다. 서버 포트만 바꾸
 | GEMINI_API_KEY | 서버 전용 provider 키 / 미설정 시 새 통화 불가 |
 | GEMINI_EPHEMERAL_TOKEN_URL | 허용된 발급 URL / `https://generativelanguage.googleapis.com/v1beta/auth_tokens` |
 | GEMINI_VALIDATED_MODEL | 검수한 모델 ID. 발행 프롬프트의 모델과 같아야 함 |
-| GEMINI_VALIDATION_REF | 실제 모델/API/음성/재개 검수 자료의 참조 |
+| GEMINI_VALIDATION_REF | 실제 모델/API/음성 검수 자료의 참조 |
 | GEMINI_MODEL_MAX_SECONDS | 검수된 모델의 통화 상한(초) / `0`은 미검수 상태 |
 | SAFECALL_GEMINI_CONNECTION_TTL_SECONDS | 서버 통화 상한(초) / `600`, 허용 1~600 |
 | SAFECALL_GEMINI_NEW_SESSION_TTL_SECONDS | 새 연결 시작 기한(초) / `60`, 허용 1~60이며 connection TTL 이하여야 함 |
 | CALL_POLICY_VERSION | 통화에 저장할 정책 버전 / `mvp-2026-09-11` |
-| CALL_MAX_RESUME_ATTEMPTS | 같은 통화 전체 재개 예산 / `1` |
-| CALL_RESUME_DELAY_MS | 재개 대기(ms) / `1000` |
 | CALL_LEASE_SECONDS | heartbeat lease(초) / `30`, 5보다 커야 함 |
 | CALL_ISSUE_TIMEOUT_SECONDS | ISSUING 결과 불명 판정 기한(초) / `10`, 1 이상이며 lease 미만. 발급 선점 시각 `issuingStartedAt` 기준 |
 | CALL_WORKER_DELAY_MS | 통화 작업자 실행 주기(ms) / `1000` |

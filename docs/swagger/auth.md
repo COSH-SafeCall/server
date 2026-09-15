@@ -11,7 +11,7 @@ A05 GET `/auth/session`으로 익명 세션과 CSRF를 준비한 뒤 A01 POST `/
 1. A05로 세션·CSRF를 준비한다.
 2. A02 POST `/auth/kakao/authorization`에 `{"purpose":"LOGIN"}`만 보낸다. decisions를 보내면 400이다.
 3. 응답 authorizationUrl로 브라우저를 이동한다. callback을 직접 조립하거나 반복 호출하지 않는다.
-4. callback의 303 이동이 끝나면 같은 origin Swagger에서 A05를 다시 실행한다. 신규 회원의 카카오 프로필은 자동 저장하지 않는다.
+4. callback의 303 이동이 끝나면 같은 origin Swagger에서 A05를 다시 실행한다. A05의 `profilePrefill`은 입력 필드 자동 채움용으로 한 번만 반환되며 신규 회원의 카카오 프로필은 자동 저장하지 않는다.
 5. U01로 빈 초기 프로필과 version을 조회한다. 기존 개인정보 동의가 유효하면 저장된 프로필을 반환한다.
 6. 개인정보 화면의 다음 클릭 한 번에서 아래 U05 요청 → U02 프로필 저장 → U08/U09/U10 연락처 변경 순으로 실행한다. Swagger에서는 각각 순서대로 실행한다.
 

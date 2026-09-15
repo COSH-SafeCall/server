@@ -20,7 +20,7 @@ Authorize로 HttpOnly 쿠키를 붙여 넣지 않는다. JWT·accessToken·refre
 | 1 | [인증·온보딩](auth.md) | 게스트 진입 또는 회원 OAuth 로그인 |
 | 2 | [사용자·홈](users.md) | 회원 프로필·보호자·설정 확인. 온보딩 PROFILE/CONTACTS에서 먼저 수행 가능 |
 | 3 | [메시지](messages.md) | 회원 M01 200, 수신자·마스킹·만료 확인 |
-| 4 | [통화](calls.md) | C01 생성 → C03 발급 → C06 종료. 실제 음성·재개는 Live 클라이언트 필요 |
+| 4 | [통화](calls.md) | C01 생성 → C03 발급 → C06 종료. 실제 음성은 Live 클라이언트 필요 |
 | 5 | [운영 사건](telemetry.md) | O01 신규 접수와 같은 eventId 중복 확인 |
 | 6 | [이력·철회·삭제](history-deletion.md) | 완료 이력 조회 → 이력 삭제 → 선택 동의 철회 → ACCOUNT 삭제를 마지막에 확인 |
 
@@ -33,8 +33,8 @@ Authorize로 HttpOnly 쿠키를 붙여 넣지 않는다. JWT·accessToken·refre
 | 값 | 사용 규칙 |
 |---|---|
 | `X-CSRF-Token` | 모든 변경 요청에 현재 A05 값. 쿠키 없는 로그아웃만 예외 |
-| `Idempotency-Key` | U02/U05/U06/U08/U09/U10/U12, C01/C04/C06/C07, R02에 UUID. 새 작업은 새 키, 같은 작업 재시도는 같은 키·본문 |
-| `X-Call-Page-Key` | C01~C07에 같은 페이지의 32바이트 난수 base64url 키. 요청마다 재생성하지 않음 |
+| `Idempotency-Key` | U02/U05/U06/U08/U09/U10/U12, C01/C04/C06, R02에 UUID. 새 작업은 새 키, 같은 작업 재시도는 같은 키·본문 |
+| `X-Call-Page-Key` | C01~C06에 같은 페이지의 32바이트 난수 base64url 키. 요청마다 재생성하지 않음 |
 | `expectedVersion` | 해당 리소스의 최신 version. 409 충돌 시 다시 읽고 사용자 동작을 재판단 |
 | `eventId` | C04/O01 사건의 UUID. 재전송에도 같은 값·본문 유지 |
 | `occurredAt` | 시간대가 있는 RFC3339 문자열. 예: `new Date().toISOString()` |

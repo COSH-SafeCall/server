@@ -6,10 +6,10 @@
 
 1. A05 `GET /api/v1/auth/session`으로 쿠키·CSRF를 준비한다.
 2. A02에 `{"purpose":"LOGIN"}`만 전송하고 authorizationUrl로 이동한다. decisions는 허용하지 않는다.
-3. 서버 콜백은 계정을 식별하고 새 세션을 발급한 뒤 `/onboarding/profile`로 이동한다. 신규 계정의 프로필은 비어 있으며 동의는 자동 생성하지 않는다.
-4. A05를 다시 호출하여 교체된 CSRF를 사용한다. 응답에는 onboardingStep이 없다.
+3. 서버 콜백은 계정을 식별하고 새 세션을 발급한 뒤 `/onboarding/profile`로 이동한다. 카카오 제공 프로필은 DB에 저장하지 않고 새 로그인 세션에 묶인 암호화된 HttpOnly 쿠키에 최대 10분간 보관한다.
+4. A05를 다시 호출하여 교체된 CSRF와 `profilePrefill`을 받는다. A05는 값을 반환한 뒤 자동 채움 쿠키를 즉시 삭제하며 응답에는 onboardingStep이 없다.
 
-카카오 프로필 자동 채움은 사용하지 않는다. 기기 권한과 SafeCall 동의는 카카오 로그인 이후 별도로 받는다. REAUTH는 `{"purpose":"REAUTH"}`로 시작하고 `/settings`로 돌아온다. 재인증에서는 온보딩 캐시를 초기화하지 않는다.
+프론트는 `profilePrefill`의 이름·성별·생년월일·전화번호를 입력 필드에 채우고, 제공되지 않은 값은 사용자가 직접 입력하게 한다. 이 값은 프론트 캐시에만 유지하고 U05 동의 저장 후 U02로 사용자가 확인한 값을 저장한다. 기기 권한과 SafeCall 동의는 카카오 로그인 이후 별도로 받는다. REAUTH는 `{"purpose":"REAUTH"}`로 시작하고 `/settings`로 돌아온다. 재인증에서는 온보딩 캐시를 초기화하지 않으며 `profilePrefill`도 발급하지 않는다.
 
 ## 개인정보 화면의 다음 버튼
 
