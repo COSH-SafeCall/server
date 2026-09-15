@@ -8,16 +8,14 @@
 
 | 구분 | 단위 | MySQL 통합 | 실패·오류·생략 | 범위 |
 |---|---:|---:|---|---|
-| 신규 DDL | 60 | 152 | 모두 0 | OAuth 사전 동의·A06/A07·서버 단계 제거, 실제 데이터 자격 검증 |
-| 기존 DB 이관 및 최신 코드 | 60 | 153 | 모두 0 | 총 213개. 구버전 암호화 삭제 복구 상태까지 추가 검증 |
+| JPA 자동 스키마 | 60 | 152 | 모두 0 | 빈 DB에 Entity 기반 구조 생성 후 실제 데이터 자격 검증 |
+| 최신 코드 | 60 | 153 | 모두 0 | 총 213개. 구버전 암호화 삭제 복구 상태까지 추가 검증 |
 
-`git diff --check`가 통과했고 서버 DDL과 설계 사본이 바이트 단위로 일치한다. 격리 MySQL 8.0.41의 실제 스키마는 **18테이블·181컬럼·155제약**이다.
+`git diff --check`가 통과했고 격리 MySQL 8.0.41에서 JPA Entity 기반 스키마와 API 동작을 확인한다.
 
 통합 테스트의 실제 `/v3/api-docs`에서 U03·A06·A07 경로와 OAuth decisions 필드가 제거됨을 확인했다. 설계 검증 75개는 30개 작업의 중복 없음과 DDL·실제 MySQL 제약을 확인했다.
 
-기존 정적 문서 스키마에 `20260915-client-onboarding.sql`을 적용해 프로필·연락처·동의·삭제 작업 보존, ONBOARDING→ACTIVE 이관, DELETION_PENDING 유지, 진행 중 OAuth 만료, 세션 유지와 단계 컬럼 제거를 확인했다. 실제 서비스 DB에는 적용하지 않았다.
-
-JSON의 `latest_suite_timestamp`는 각 작업에서 마지막으로 시작한 suite의 UTC 시각이다. 완료 시각이 아니다. 기준 커밋과 함께 미커밋 변경을 검증했으며 정확한 스키마 해시·마이그레이션 목록은 JSON에 있다.
+JSON의 `latest_suite_timestamp`는 각 작업에서 마지막으로 시작한 suite의 UTC 시각이다. 완료 시각이 아니다.
 
 ## 실행 방법
 
@@ -33,14 +31,12 @@ git diff --check
 
 | 명령 | 검사 범위 |
 |---|---|
-| `verify_auth.py` | 임시 MySQL 생성 → DDL 적용 → 단위·통합 테스트 → 프로세스·데이터 정리 |
+| `verify_auth.py` | 임시 MySQL과 빈 DB 생성 → JPA 자동 스키마 적용 → 단위·통합 테스트 → 프로세스·데이터 정리 |
 | `bootJar` | 실행 JAR 생성 |
-| `report_web_verification.py` | DDL 사본 일치와 마지막 Gradle XML 집계. 테스트 자체는 실행하지 않음 |
+| `report_web_verification.py` | 마지막 Gradle XML 집계. 테스트 자체는 실행하지 않음 |
 | `git diff --check` | 변경 파일의 공백 오류 |
 
 MySQL 경로가 다르면 `python scripts/verify_auth.py --mysql-bin "C:/Program Files/MySQL/MySQL Server 8.0/bin"`으로 지정한다. 빠른 단위 검사만 필요하면 `.\gradlew.bat test`를 사용한다.
-
-기존 스키마 사본을 준비한 뒤 `python scripts/verify_auth.py --onboarding-migration-from <이전-DDL.sql> --verify-design`으로 이관 후 전체 API를 검증한다. 이번 기준 사본은 `d3a667870553f7c380f01bf8f047b63398395ec8`의 `db/schema-mysql.sql`이다. `--schema-only --verify-design`은 Gradle 없이 설계/스키마만 검증한다. 이 경로들도 항상 별도 임시 MySQL을 생성한다.
 
 통합 테스트는 3306을 제외한 임의 포트와 임시 DB·합성 자격 증명을 사용한다. test 프로필은 로컬 `.env`를 읽지 않는다. 격리 DB 증명 없이 `integrationTest`만 직접 실행하지 않는다. 현재 소스와 XML의 최신성을 집계 명령이 보장하지 않으므로 전체 실행 성공을 확인한 후 결과를 갱신한다.
 

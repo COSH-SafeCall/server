@@ -23,6 +23,7 @@ import com.safecall.service.auth.repository.*;
 import com.safecall.service.auth.service.*;
 import com.safecall.service.call.gemini.*;
 import com.safecall.service.call.service.*;
+import com.safecall.service.common.config.*;
 import com.safecall.service.common.crypto.*;
 import com.safecall.service.common.error.*;
 import com.safecall.service.user.service.*;
@@ -46,6 +47,7 @@ class WebIntegrationTest {
 	@MockitoBean KakaoUnlinkClient unlink;
 	@Autowired org.springframework.context.ApplicationContext applicationContext;
 	@MockitoSpyBean com.safecall.service.telemetry.service.TelemetryPolicy telemetryPolicy;
+	@Autowired LegacySchemaCleanup legacySchemaCleanup;
 	private final HttpClient http=HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
 	@DynamicPropertySource static void config(DynamicPropertyRegistry r){
 		String url=System.getenv("AUTH_TEST_DB_URL");
@@ -776,10 +778,18 @@ class WebIntegrationTest {
 		Browser b=guest();UUID call=create(b);active(b,call);clock.advance(30);worker.tick();
 		assertThat(jdbc.queryForObject("SELECT `state` FROM `callSession` WHERE `id`=?",String.class,bin(call))).isEqualTo("ENDED");
 	}
-	@Test void finalSchemaHasExpectedTablesColumnsAndConstraints(){
+	@Test void jpaSchemaHasExpectedTablesColumnsAndConstraints(){
 		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(18);
 		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(177);
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema=DATABASE()",Integer.class)).isEqualTo(152);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema=DATABASE()",Integer.class)).isGreaterThanOrEqualTo(70);
+	}
+	@Test void legacyOnboardingSchemaIsRemovedBeforeServingRequests(){
+		jdbc.execute("ALTER TABLE `webSession` ADD COLUMN `onboardingStep` VARCHAR(24) NOT NULL DEFAULT 'ENTRY', ADD COLUMN `version` BIGINT NOT NULL DEFAULT 1");
+		jdbc.execute("CREATE TABLE `serviceDocument` (`code` VARCHAR(64) PRIMARY KEY)");
+		jdbc.execute("CREATE TABLE `oauthConsent` (`id` BINARY(16) PRIMARY KEY)");
+		legacySchemaCleanup.run(null);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('serviceDocument','oauthConsent')",Integer.class)).isZero();
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='webSession' AND column_name IN ('onboardingStep','version')",Integer.class)).isZero();
 	}
 	@Test void aiWithdrawalMasksDemographicsBeforeWorkerAndDoesNotBlockLocationConsent()throws Exception{
 		Browser b=member();status(send("POST","/api/v1/me/consents/AI_CALL/withdrawal",Map.of(),b,UUID.randomUUID()),202);

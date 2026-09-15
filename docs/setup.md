@@ -103,6 +103,6 @@ origin을 바꾸면 redirect URI도 함께 설정한다. 서버 포트만 바꾸
 
 동의·개인정보·AI 정책·도움말·SOS·통화 전 안내 문구는 프론트엔드 정적 콘텐츠로 관리한다. 서버는 문서 본문을 저장하거나 조회 API로 제공하지 않는다. 동의 코드 3종과 version=1만 고정 계약으로 검증한다.
 
-[개발 프롬프트 SQL](../db/dev/seed-draft-call-prompts.sql)은 DRAFT다. 실제 모델/API/voice와 안전성을 검수한 뒤 [PromptPublicationService](../src/main/java/com/safecall/service/call/service/PromptPublicationService.java)로 4개 상황 × 3개 상대의 12개 조합을 발행한다. 이전 PUBLISHED는 RETIRED로 전환하며 기존 통화는 자신의 releaseId를 유지한다.
+프롬프트 배포본은 실제 모델/API/voice와 안전성을 검수한 뒤 [PromptPublicationService](../src/main/java/com/safecall/service/call/service/PromptPublicationService.java)로 4개 상황 × 3개 상대의 12개 조합을 발행한다. 이전 PUBLISHED는 RETIRED로 전환하며 기존 통화는 자신의 releaseId를 유지한다.
 
 [발행 명령](../src/main/java/com/safecall/service/call/service/PromptPublicationCommand.java)은 앱 시작 시 `app.prompts.publish-release-id`와 `app.prompts.validation-ref`를 명시한 경우에만 실행된다. 실제 release UUID와 검수 참조를 사용하며 실행 후 시작 설정에서 제거한다. DB를 변경하는 명령이고 Swagger API가 아니다. 임의 검수값으로 발행 조건을 통과시키지 않는다.

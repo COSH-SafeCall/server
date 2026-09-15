@@ -7,6 +7,16 @@ spring:
     hikari:
       connection-init-sql: "SET SESSION time_zone = '+00:00', innodb_lock_wait_timeout = 1"
       connection-timeout: 3000
+  jpa:
+    hibernate:
+      ddl-auto: update
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+    open-in-view: false
+    properties:
+      hibernate:
+        type:
+          preferred_uuid_jdbc_type: BINARY
   sql:
     init:
       mode: never
