@@ -4,7 +4,7 @@
 
 ## 코드 구성
 
-기본 패키지는 `src/main/java/com/safecall/service`다. Controller가 HTTP와 DTO를 처리하고 Service가 권한·상태·트랜잭션을 관리하며 Repository가 SQL과 행 매핑을 담당한다. JPA Entity 대신 JDBC와 Java record를 사용한다.
+기본 패키지는 `src/main/java/com/safecall/service`다. Controller가 HTTP와 DTO를 처리하고 Service가 권한·상태·트랜잭션을 관리하며 Repository가 SQL과 행 매핑을 담당한다. 데이터 접근은 기존 JDBC를 유지하고, 도메인별 JPA Entity가 자동 스키마 갱신 기준을 제공한다.
 
 | 영역 | 주요 코드 | 역할 |
 |---|---|---|
