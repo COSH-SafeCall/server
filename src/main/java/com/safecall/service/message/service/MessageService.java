@@ -7,7 +7,6 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-import com.safecall.service.auth.api.AuthDtos.Step;
 import com.safecall.service.auth.service.AuthTransactions;
 import com.safecall.service.common.crypto.SecretCrypto;
 import com.safecall.service.common.crypto.UserKeyStore;
@@ -41,8 +40,6 @@ public class MessageService {
 		var material = rows.getFirst();
 		if (material.isCleanupPending()) throw new CustomException(ErrorCode.DATA_CLEANUP_PENDING);
 		if (!material.isPrivacyGranted()) throw new CustomException(ErrorCode.CONSENT_REQUIRED);
-		if (material.step()!=Step.COMPLETE && !(mode==Mode.TEST && material.step()==Step.MESSAGE_TEST))
-			throw new CustomException(ErrorCode.ONBOARDING_REQUIRED);
 		if (!material.isConfirmed() || material.name()==null || material.phone()==null)
 			throw new CustomException(ErrorCode.MESSAGE_PROFILE_REQUIRED);
 		if (material.isCallOpen()) throw new CustomException(ErrorCode.CALL_ALREADY_OPEN);

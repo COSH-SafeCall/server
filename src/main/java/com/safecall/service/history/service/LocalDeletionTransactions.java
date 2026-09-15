@@ -51,7 +51,9 @@ public class LocalDeletionTransactions {
 			// 이전 버전 작업에 복구 자료가 없으면 추측하여 계정을 복구하지 않고 PENDING 재시도를 유지한다.
 			if(ref==null)return;
 			previous=new String(crypto.open(keys.read(ref),"DELETION_ROLLBACK:"+id,(byte[])jobs.getFirst().get("cleanupCipher")),java.nio.charset.StandardCharsets.UTF_8);
-			if(!java.util.Set.of("ACTIVE","ONBOARDING").contains(previous))return;
+			// Pending deletion jobs from before the migration may contain this encrypted legacy state.
+			if("ONBOARDING".equals(previous))previous="ACTIVE";
+			if(!"ACTIVE".equals(previous))return;
 		}
 		jdbc.update("UPDATE `deletionJob` SET `status`='FAILED',`errorCode`='LOCAL_DELETION_FAILED',`accountSubjectHash`=NULL,`cleanupCipher`=NULL,`cleanupKeyRef`=NULL WHERE `id`=?",bin(id));
 		if(isAccount)jdbc.update("UPDATE `appUser` SET `status`=?,`version`=`version`+1 WHERE `id`=? AND `status`='DELETION_PENDING'",previous,bin(user));

@@ -9,15 +9,13 @@ import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.json.JsonMapper;
 import com.safecall.service.auth.repository.AuthRepository;
 import com.safecall.service.common.crypto.*;
 import com.safecall.service.user.api.UserDtos.DeletionReceipt;
 import com.safecall.service.user.repository.UserRepository;
 
-/** U06/R02 ACCOUNT와 미완료 가입의 로컬 삭제. 외부 정리는 별도 worker가 커밋 이후 수행한다. */
+/** U06/R02 ACCOUNT의 로컬 삭제. 외부 정리는 별도 worker가 커밋 이후 수행한다. */
 @Component
 public class AccountLocalCleanup {
 	private final JdbcTemplate jdbc;
@@ -28,28 +26,18 @@ public class AccountLocalCleanup {
 	private final TransientKeys temporaryKeys;
 	private final JsonMapper mapper;
 	private final Clock clock;
-	private final TransactionTemplate transaction;
 	private final com.safecall.service.history.service.LocalDeletionTransactions deletionTransactions;
 
 	public AccountLocalCleanup(JdbcTemplate jdbc,AuthRepository auth,UserRepository users,SecretCrypto crypto,
-		UserKeyStore userKeys,TransientKeys temporaryKeys,JsonMapper mapper,Clock clock,PlatformTransactionManager manager,
+		UserKeyStore userKeys,TransientKeys temporaryKeys,JsonMapper mapper,Clock clock,
 		com.safecall.service.history.service.LocalDeletionTransactions deletionTransactions) {
 		this.jdbc=jdbc;this.auth=auth;this.users=users;this.crypto=crypto;this.userKeys=userKeys;
-		this.temporaryKeys=temporaryKeys;this.mapper=mapper;this.clock=clock;this.transaction=new TransactionTemplate(manager);
+		this.temporaryKeys=temporaryKeys;this.mapper=mapper;this.clock=clock;
 		this.deletionTransactions=deletionTransactions;
 	}
 
 	@Scheduled(scheduler="cleanupScheduler",fixedDelayString="${app.auth.cleanup-delay-ms}",initialDelayString="${app.auth.cleanup-delay-ms}")
 	public void run() {
-		try {
-			var abandoned=jdbc.queryForList("SELECT `id` FROM `appUser` WHERE `status`='ONBOARDING' AND `createdAt`<=? LIMIT 100",
-				byte[].class,time(clock.instant().minusSeconds(86400)));
-			for(byte[] id:abandoned) {
-				// Catch outside the transaction so rollback/uncertain-commit handling finishes first.
-				try { transaction.executeWithoutResult(tx -> queueAbandoned(uuid(id))); }
-				catch(RuntimeException ex) { failure(); }
-			}
-		} catch(RuntimeException ex) {failure();}
 		try {
 			// Preserve the complete 60 second receipt replay window before account rows disappear.
 			var jobs=jdbc.queryForList("SELECT `id`,`userId` FROM `deletionJob` WHERE `scope`='ACCOUNT' AND `status`='PENDING' AND `requestedAt`<=? LIMIT 100",
@@ -59,19 +47,6 @@ public class AccountLocalCleanup {
 					()->deleteLocal((byte[])job.get("id"),(byte[])job.get("userId")));
 			}
 		} catch(RuntimeException ex) {failure();}
-	}
-
-	private void queueAbandoned(UUID id) {
-		var user=auth.user(id,true);
-		if(user==null || !user.status().equals("ONBOARDING"))return;
-		boolean expired=Boolean.TRUE.equals(jdbc.queryForObject("SELECT `createdAt`<=? FROM `appUser` WHERE `id`=?",Boolean.class,time(clock.instant().minusSeconds(86400)),bin(id)));
-		if(!expired || users.pending(id,"ACCOUNT"))return;
-		var now=clock.instant();String receipt=crypto.randomToken();
-		users.deletion(id,new DeletionReceipt(UUID.randomUUID(),"ACCOUNT","PENDING",receipt,now.plusSeconds(86400),now.plusSeconds(2592000)),crypto.hash("DELETION_RECEIPT",receipt),now);
-		for(UUID session:users.sessions(id)) {
-			var locked=auth.lockSession(session);
-			if(locked!=null && locked.status().equals("ACTIVE"))auth.endSession(locked,now,"REVOKED","DATA_DELETION",crypto.hash("SERVER_EVENT","DATA_DELETION"));
-		}
 	}
 
 	private void deleteLocal(byte[] jobId,byte[] owner) {

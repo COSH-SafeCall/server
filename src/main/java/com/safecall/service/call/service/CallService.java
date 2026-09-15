@@ -39,10 +39,11 @@ public class CallService {
 	}
 	private Call owned(Session s,UUID id,String page){Call c=repository.call(id,false);if(c==null||!c.sessionId().equals(s.id())||!crypto.isEqual(c.pageKeyHash(),pageHash(page)))throw new CustomException(ErrorCode.RESOURCE_NOT_FOUND);return repository.call(id,true);}
 	private void eligible(Session s){
-		if(s.step()!=Step.COMPLETE)throw new CustomException(ErrorCode.ONBOARDING_REQUIRED);
 		if(s.userId()!=null){
 			if(users.pending(s.userId(),"ACCOUNT")||users.pending(s.userId(),"AI_DATA"))throw new CustomException(ErrorCode.DATA_CLEANUP_PENDING);
-			if(!repository.hasConsent(s.userId(),"PRIVACY_PROCESSING",now())||!repository.hasConsent(s.userId(),"AI_CALL",now()))throw new CustomException(ErrorCode.CONSENT_REQUIRED);
+			if(!repository.hasConsent(s.userId(),"PRIVACY_PROCESSING")||!repository.hasConsent(s.userId(),"AI_CALL"))throw new CustomException(ErrorCode.CONSENT_REQUIRED);
+			var user=auth.user(s.userId(),false);
+			if(user.confirmedAt()==null || user.nameCipher()==null || user.phoneCipher()==null)throw new CustomException(ErrorCode.PROFILE_REQUIRED);
 		}
 	}
 	private Replay replay(Session s,UUID id,String op,UUID key,byte[] hash){Replay r=auth.replay(scope(s,id),op,key);if(r!=null){match(r.requestHash(),hash);if(!r.status().equals("DONE"))throw new CustomException(ErrorCode.REQUEST_IN_PROGRESS,1);}return r;}
@@ -78,27 +79,25 @@ public class CallService {
 		if(!g.status().equals("READY"))throw new CustomException(ErrorCode.CALL_TERMINAL);
 		Prompt p=prompt(call.releaseId(),call.view().scenarioCode(),call.view().counterpartCode(),now());
 		String token=new String(crypto.open(keys.read(g.keyRef()),"GEMINI_GRANT:"+g.id(),g.tokenCipher()),StandardCharsets.UTF_8);
-		return new ConnectionView(g.id(),g.generation(),g.purpose(),"READY",token,p.model(),p.apiVersion(),p.voice(),List.of("AUDIO"),new SessionResumption(true),g.newSessionExpiresAt(),g.expiresAt(),1);
+		return new ConnectionView(g.id(),"READY",token,p.model(),p.apiVersion(),p.voice(),List.of("AUDIO"),g.newSessionExpiresAt(),g.expiresAt(),1);
 	}
 	public CallView event(String cookie,String page,UUID id,CallEvent body,UUID key){
 		Session s=authentication.authenticated(cookie);Call call=owned(s,id,page);byte[] hash=hash(body);Instant now=now();
 		if(replay(s,id,"CALL_EVENT",key,hash)!=null)return expire(call,now).view();
 		byte[] prior=repository.eventHash(id,body.eventId());if(prior!=null){match(prior,hash);remember(s,id,"CALL_EVENT",key,hash,id);return expire(call,now).view();}
 		call=expire(call,now);active(call);eligible(s);
-		boolean connected=body.type()==EventType.CONNECTED||body.type()==EventType.RESUMED;
+		boolean connected=body.type()==EventType.CONNECTED;
 		if(connected!=(body.grantId()!=null)||(body.type()==EventType.FAILED)!=(body.errorCode()!=null))throw new CustomException(ErrorCode.INVALID_REQUEST);
 		Grant g=repository.grant(id);String state=call.view().state();
 		if(connected&&!g.id().equals(body.grantId()))throw new CustomException(ErrorCode.STALE_CONNECTION_GENERATION);
 		if(body.expectedVersion()!=call.view().version())throw new CustomException(ErrorCode.VERSION_CONFLICT);
 		switch(body.type()){
-			case CONNECTED,RESUMED -> {
-				boolean initial=body.type()==EventType.CONNECTED;
-				if(!state.equals(initial?"PREPARING":"ACTIVE")||!g.status().equals("READY")||!g.purpose().equals(initial?"INITIAL":"RESUME"))throw new CustomException(ErrorCode.CALL_TRANSITION_INVALID);
+			case CONNECTED -> {
+				if(!state.equals("PREPARING")||!g.status().equals("READY"))throw new CustomException(ErrorCode.CALL_TRANSITION_INVALID);
 				repository.used(g,now);repository.transition(id,state,now);
 			}
-			case RINGING_SHOWN -> {if(!state.equals("PREPARING")||!g.status().equals("USED")||!g.purpose().equals("INITIAL"))throw new CustomException(ErrorCode.CALL_TRANSITION_INVALID);state="RINGING";repository.transition(id,state,now);}
+			case RINGING_SHOWN -> {if(!state.equals("PREPARING")||!g.status().equals("USED"))throw new CustomException(ErrorCode.CALL_TRANSITION_INVALID);state="RINGING";repository.transition(id,state,now);}
 			case ANSWERED -> {if(!state.equals("RINGING"))throw new CustomException(ErrorCode.CALL_TRANSITION_INVALID);state="ACTIVE";repository.transition(id,state,now);}
-			case GO_AWAY,CONNECTION_INTERRUPTED -> {if(!state.equals("ACTIVE"))throw new CustomException(ErrorCode.CALL_TRANSITION_INVALID);repository.transition(id,state,now);}
 			case FAILED -> {state="FAILED";repository.end(id,state,body.errorCode().name(),now);}
 		}
 		repository.event(id,body.eventId(),hash,body.type().name(),state,body.occurredAt(),now);remember(s,id,"CALL_EVENT",key,hash,id);return repository.call(id,false).view();
@@ -113,32 +112,14 @@ public class CallService {
 		c=expire(c,now());if(!c.isTerminal()){repository.end(id,"ENDED",body.reason().name(),now());repository.event(id,UUID.randomUUID(),hash,"ENDED","ENDED",body.occurredAt(),now());}
 		remember(s,id,"CALL_END",key,hash,id);return repository.call(id,false).view();
 	}
-	public GrantView renew(String cookie,String page,UUID id,RenewalRequest body,UUID key){
-		Session s=authentication.authenticated(cookie);Call c=owned(s,id,page);byte[] hash=hash(body);
-		c=expire(c,now());active(c);eligible(s);
-		Replay r=replay(s,id,"CALL_RENEWAL",key,hash);
-		if(r!=null){Grant g=repository.grant(id,r.resourceId());if(g==null)throw new CustomException(ErrorCode.RESOURCE_NOT_FOUND);return new GrantView(g.id(),g.generation(),g.purpose(),g.status());}
-		Grant previous=repository.grant(id);
-		if(!c.view().state().equals("ACTIVE"))throw new CustomException(ErrorCode.CALL_TRANSITION_INVALID);
-		if(!previous.id().equals(body.previousGrantId()))throw new CustomException(ErrorCode.RENEWAL_ALREADY_REQUESTED);
-		if(repository.resumeCount(id)>=c.view().maxResumeAttempts())throw new CustomException(ErrorCode.RESUME_BUDGET_EXHAUSTED);
-		if(!previous.status().equals("USED"))throw new CustomException(ErrorCode.RENEWAL_ALREADY_REQUESTED);
-		Instant minute=now().truncatedTo(ChronoUnit.MINUTES);byte[] rate=crypto.hash("RENEW_RATE",id.toString());
-		if(repository.rate(rate,"SESSION","CALL_RENEWAL",minute,60,false)>=policy.renewalMinuteLimit())throw new CustomException(ErrorCode.RATE_LIMITED,60);
-		repository.rate(rate,"SESSION","CALL_RENEWAL",minute,60,true);
-		UUID grant=repository.newGrant(id,previous.generation()+1,"RESUME",now());repository.transition(id,"ACTIVE",now());
-		repository.event(id,UUID.randomUUID(),hash,"RESUME_REQUESTED","ACTIVE",now(),now());remember(s,id,"CALL_RENEWAL",key,hash,grant);
-		return new GrantView(grant,previous.generation()+1,"RESUME","PENDING");
-	}
 	private void active(Call c){if(c.isTerminal())throw new SessionInvalidException(ErrorCode.CALL_TERMINAL);}
 	private void terminate(Call c,String state,String reason,Instant now){if(c.isTerminal())return;repository.end(c.view().id(),state,reason,now);repository.event(c.view().id(),UUID.randomUUID(),crypto.hash("SERVER_EVENT",reason),state,state,now,now);}
-	private String failure(Grant g){return g.purpose().equals("RESUME")?"RESUMPTION_FAILED":"CONNECTION_FAILED";}
 	private Call expire(Call c,Instant now){
 		if(c.isTerminal())return c;Grant g=repository.grant(c.view().id());
-		if(g.status().equals("ISSUING")&&(g.issuingStartedAt()==null||!g.issuingStartedAt().plusSeconds(policy.issueTimeoutSeconds()).isAfter(now))){terminate(c,"FAILED",failure(g),now);repository.markUnknown(g.id());}
+		if(g.status().equals("ISSUING")&&(g.issuingStartedAt()==null||!g.issuingStartedAt().plusSeconds(policy.issueTimeoutSeconds()).isAfter(now))){terminate(c,"FAILED","CONNECTION_FAILED",now);repository.markUnknown(g.id());}
 		else if(!c.view().expiresAt().isAfter(now))terminate(c,"ENDED","DURATION_LIMIT",now);
 		else if(!c.view().leaseExpiresAt().isAfter(now))terminate(c,"ENDED","SESSION_EXPIRED",now);
-		else if(g.status().equals("READY")&&!g.newSessionExpiresAt().isAfter(now))terminate(c,"FAILED",failure(g),now);
+		else if(g.status().equals("READY")&&!g.newSessionExpiresAt().isAfter(now))terminate(c,"FAILED","CONNECTION_FAILED",now);
 		return repository.call(c.view().id(),false);
 	}
 	private static Instant min(Instant a,Instant b){return a.isBefore(b)?a:b;}
@@ -175,9 +156,6 @@ public class CallService {
 		}
 	}
 	private Call lockForWorker(UUID id){Call c=repository.call(id,false);if(c==null||auth.lockSession(c.sessionId())==null)return null;return repository.call(id,true);}
-	private byte[] setupHash(UUID id,Prompt prompt,String instruction){
-		return crypto.hash("CALL_SETUP:v1:"+id,mapper.writeValueAsString(List.of(prompt.model(),prompt.apiVersion(),prompt.voice(),instruction)));
-	}
 	private boolean workerEligible(Session s,Call c){
 		if(!s.status().equals("ACTIVE")||!s.expiresAt().isAfter(now())){terminate(c,"ENDED","SESSION_EXPIRED",now());return false;}
 		User u=auth.user(s.userId(),false);if(s.userId()!=null&&(u==null||u.status().equals("DELETION_PENDING"))){terminate(c,"ENDED","DATA_DELETION",now());return false;}
@@ -187,28 +165,18 @@ public class CallService {
 		Call c=lockForWorker(id);if(c==null)return null;c=expire(c,now());if(c.isTerminal())return null;Session s=auth.session(c.sessionId());
 		if(!workerEligible(s,c))return null;Grant g=repository.grant(id);if(!g.status().equals("PENDING"))return null;
 		try{
-			Prompt p=prompt(c.releaseId(),c.view().scenarioCode(),c.view().counterpartCode(),now());String instruction=null;
-			if(g.purpose().equals("INITIAL")){
-				Instant preparedAt=now();var composed=composer.compose(p,auth.user(s.userId(),false),preparedAt);instruction=composed.instruction();
-				repository.flags(id,composed.isDemographicApplied(),composed.isGenderAddressApplied());
-				repository.anchor(id,preparedAt,setupHash(id,p,instruction));
-			}else{
-				var anchor=repository.anchor(id);
-				if(anchor==null||anchor.preparedAt()==null||anchor.instructionHash()==null)throw new CustomException(ErrorCode.PROMPT_NOT_READY);
-				instruction=composer.compose(p,auth.user(s.userId(),false),anchor.preparedAt()).instruction();
-				// Never change the active conversation's policy or persist the full prompt. Fail closed
-				// if profile, release or composer changes prevent reconstruction of the original setup.
-				if(!crypto.isEqual(anchor.instructionHash(),setupHash(id,p,instruction)))throw new CustomException(ErrorCode.PROMPT_NOT_READY);
-			}
+			Prompt p=prompt(c.releaseId(),c.view().scenarioCode(),c.view().counterpartCode(),now());
+			var composed=composer.compose(p,auth.user(s.userId(),false),now());String instruction=composed.instruction();
+			repository.flags(id,composed.isDemographicApplied(),composed.isGenderAddressApplied());
 			if(!repository.claim(g.id(),now()))return null;
-			return new GeminiClient.IssueRequest(p.model(),p.apiVersion(),p.voice(),instruction,min(now().plusSeconds(settings.newSessionSeconds()),c.view().expiresAt()),c.view().expiresAt(),g.id(),g.purpose());
-		}catch(CustomException ex){terminate(c,"FAILED",failure(g),now());return null;}
+			return new GeminiClient.IssueRequest(p.model(),p.apiVersion(),p.voice(),instruction,min(now().plusSeconds(settings.newSessionSeconds()),c.view().expiresAt()),c.view().expiresAt(),g.id());
+		}catch(CustomException ex){terminate(c,"FAILED","CONNECTION_FAILED",now());return null;}
 	}
 	public void finish(UUID id,GeminiClient.IssueRequest request,String token,Boolean unknown){
 		Call c=lockForWorker(id);if(c==null)return;c=expire(c,now());Grant g=repository.grant(id);
 		if(c.isTerminal()||!g.id().equals(request.grantId())||!g.status().equals("ISSUING")||!workerEligible(auth.session(c.sessionId()),c))return;
-		if(token==null){terminate(c,"FAILED",failure(g),now());if(Boolean.TRUE.equals(unknown))repository.markUnknown(g.id());return;}
-		if(!request.newSessionExpiresAt().isAfter(now())||!request.expiresAt().isAfter(now())){terminate(c,"FAILED",failure(g),now());return;}
+		if(token==null){terminate(c,"FAILED","CONNECTION_FAILED",now());if(Boolean.TRUE.equals(unknown))repository.markUnknown(g.id());return;}
+		if(!request.newSessionExpiresAt().isAfter(now())||!request.expiresAt().isAfter(now())){terminate(c,"FAILED","CONNECTION_FAILED",now());return;}
 		String ref=keys.create(g.id());byte[] cipher=crypto.seal(keys.read(ref),"GEMINI_GRANT:"+g.id(),token.getBytes(StandardCharsets.UTF_8));
 		repository.ready(g.id(),cipher,ref,request.newSessionExpiresAt(),request.expiresAt(),now());
 	}

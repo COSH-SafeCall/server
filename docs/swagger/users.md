@@ -6,7 +6,7 @@
 
 1. U01 `GET /me/profile`에서 현재 값과 version을 읽는다.
 2. U02 `PATCH /me/profile`에 아래 **6개 필드 전부**와 현재 CSRF·새 Idempotency-Key를 보낸다. 예시 값은 테스트용이며 version은 U01 값으로 바꾼다.
-3. 200 응답과 U01 재조회에서 확인 값·version을 확인한다. 온보딩 중이면 [PROFILE 단계](auth.md)로 돌아간다.
+3. 200 응답과 U01 재조회에서 확인 값·version을 확인한다. 화면 전환은 프론트 캐시로 처리한다.
 
 ```json
 {"name":"홍길동","gender":null,"birthDate":null,"phone":"01012345678","isConfirmed":true,"expectedVersion":1}
@@ -29,14 +29,12 @@ gender/birthDate는 명시적 null이 가능하다. 새 성별·생일 저장에
 
 U11 `GET /me/settings`에서 version을 읽은 뒤 U12 `PATCH /me/settings`에 `{"incomingAlertMode":"SILENT","expectedVersion":1}`을 보내 200을 확인한다. RINGTONE/SILENT만 허용하며 다른 값은 422 INVALID_ALERT_MODE다.
 
-## 문서·동의 U03~U05
+## 동의 U04~U05
 
 | 호출 | 확인 |
 |---|---|
-| U03 GET `/documents/{code}` | 공개 단건 조회. version 생략은 현재 발행본, `?version=...`은 지정 버전 |
-| U03 + If-None-Match | 첫 응답 ETag 재사용 시 304, 본문 없음 |
-| U04 GET `/me/consents` | decisionVersion/currentVersion, action, isEffective |
-| U05 POST `/me/consents` | 아래 decisions 1~3개, 중복 코드 금지. version은 U03 값 |
+| U04 GET `/me/consents` | decisionVersion/currentVersion, action, isEffective. currentVersion은 항상 1 |
+| U05 POST `/me/consents` | 아래 decisions 1~3개, 중복 코드 금지. version은 항상 1 |
 
 ```json
 {"decisions":[{"code":"LOCATION_PROCESSING","version":1,"action":"GRANTED"}]}
@@ -46,7 +44,7 @@ U05는 GRANTED/DECLINED만 받는다. 기존 GRANTED를 DECLINED로 바꾸는 �
 
 ## 홈 H01/H02
 
-온보딩 완료 후 H01 `GET /home`, H02 `GET /call-options`를 조회한다.
+프로필·동의·연락처 저장 후 H01 `GET /home`, H02 `GET /call-options`를 조회한다.
 
 | 시나리오 | 기대 결과 |
 |---|---|

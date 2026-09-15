@@ -9,7 +9,7 @@
 1. Java 21, MySQL 8.0.41 이상 8.0/8.4를 준비한다. 테스트를 실행할 경우 Python 3도 필요하다.
 2. 아래 표를 참고하여 로컬 `.env`에 필요한 값을 직접 입력한다. 기존 `.env`가 있으면 전체 파일을 덮어쓰지 않는다.
 3. 기본값을 사용할 선택 항목은 `.env`에서 그 줄을 제거한다. `KEY=`는 빈 값이며 `${KEY:기본값}`의 기본값 선택과 다르다. 숫자·URL 항목을 빈 줄로 남기면 시작에 실패할 수 있다.
-4. [DB 설치](database.md)와 필요한 문서 발행을 마친 뒤 `./gradlew.bat bootRun`을 실행한다.
+4. [DB 설치](database.md)와 필요한 프롬프트 발행을 마친 뒤 `./gradlew.bat bootRun`을 실행한다.
 
 ## DB·웹·암호화
 
@@ -37,7 +37,7 @@
 | KAKAO_CLIENT_SECRET | 앱에서 활성화한 client secret / 미사용 시 생략 가능 |
 | KAKAO_ADMIN_KEY | ACCOUNT 로컬 삭제 후 연결 해제용 서버 전용 Service app admin key. 미설정 시 LOCAL_DELETED에서 재시도 |
 | KAKAO_REDIRECT_URI | 정확히 `WEB_ORIGIN` + `/api/v1/auth/kakao/callback` |
-| KAKAO_LOGIN_SCOPES | 앱 승인 범위에 맞춘 항목 / `name,gender,birthday,birthyear,phone_number` |
+| KAKAO_LOGIN_SCOPES | 기본 빈 값. 서비스 프로필은 로그인 후 U02에서 입력 |
 | AUTH_REQUESTS_PER_MINUTE | 인증 시작 IP별 분당 제한 / `10` |
 | AUTH_CLEANUP_DELAY_MS | 인증·삭제·보존 정리 주기(ms) / `1000` |
 
@@ -50,18 +50,16 @@ origin을 바꾸면 redirect URI도 함께 설정한다. 서버 포트만 바꾸
 | GEMINI_API_KEY | 서버 전용 provider 키 / 미설정 시 새 통화 불가 |
 | GEMINI_EPHEMERAL_TOKEN_URL | 허용된 발급 URL / `https://generativelanguage.googleapis.com/v1beta/auth_tokens` |
 | GEMINI_VALIDATED_MODEL | 검수한 모델 ID. 발행 프롬프트의 모델과 같아야 함 |
-| GEMINI_VALIDATION_REF | 실제 모델/API/음성/재개 검수 자료의 참조 |
+| GEMINI_VALIDATION_REF | 실제 모델/API/음성 검수 자료의 참조 |
 | GEMINI_MODEL_MAX_SECONDS | 검수된 모델의 통화 상한(초) / `0`은 미검수 상태 |
 | SAFECALL_GEMINI_CONNECTION_TTL_SECONDS | 서버 통화 상한(초) / `600`, 허용 1~600 |
 | SAFECALL_GEMINI_NEW_SESSION_TTL_SECONDS | 새 연결 시작 기한(초) / `60`, 허용 1~60이며 connection TTL 이하여야 함 |
 | CALL_POLICY_VERSION | 통화에 저장할 정책 버전 / `mvp-2026-09-11` |
-| CALL_MAX_RESUME_ATTEMPTS | 같은 통화 전체 재개 예산 / `1` |
-| CALL_RESUME_DELAY_MS | 재개 대기(ms) / `1000` |
 | CALL_LEASE_SECONDS | heartbeat lease(초) / `30`, 5보다 커야 함 |
 | CALL_ISSUE_TIMEOUT_SECONDS | ISSUING 결과 불명 판정 기한(초) / `10`, 1 이상이며 lease 미만. 발급 선점 시각 `issuingStartedAt` 기준 |
 | CALL_WORKER_DELAY_MS | 통화 작업자 실행 주기(ms) / `1000` |
 
-모델/API/voice는 발행된 promptRelease/personaPrompt에서 읽는다. 환경변수만 입력하거나 DRAFT 초안을 넣는 것으로 통화가 준비되지는 않는다. [프롬프트 발행](#문서와-프롬프트-발행)을 참고한다.
+모델/API/voice는 발행된 promptRelease/personaPrompt에서 읽는다. 환경변수만 입력하거나 DRAFT 초안을 넣는 것으로 통화가 준비되지는 않는다. [프롬프트 발행](#프롬프트-발행)을 참고한다.
 
 예를 들어 connection TTL을 30초로 줄이면 new-session TTL도 30초 이하로 맞춰야 한다. 기본 60초를 그대로 두면 시작 시 설정 검증에 실패한다. 통화의 최종 만료는 서버 상한·검수된 모델 상한·웹 세션 잔여 시간의 최솟값이다.
 
@@ -101,9 +99,9 @@ origin을 바꾸면 redirect URI도 함께 설정한다. 서버 포트만 바꾸
 4. callback은 서버 Controller가 처리해야 한다. SPA fallback으로 넘기지 않는다. callback 이후 `/onboarding/profile`, `/settings`, `/login`은 프론트엔드 화면 경로다. 백엔드만 검증할 때는 callback 처리가 끝난 뒤 같은 origin의 Swagger로 돌아와 A05를 다시 조회한다.
 5. 실제 로그인·취소·동일 계정 REAUTH는 [인증 흐름](swagger/auth.md)에 따라 확인한다.
 
-## 문서와 프롬프트 발행
+## 프롬프트 발행
 
-회원 로그인 전 PRIVACY_PROCESSING, AI_CALL, LOCATION_PROCESSING과 안내 문서를 검수하여 DB에 적용한다. 동의 문서 3종의 최초 버전과 isCurrent는 프로젝트 기간 동안 고정한다. 공개 문서 발행 HTTP API와 자동 seed는 없다.
+동의·개인정보·AI 정책·도움말·SOS·통화 전 안내 문구는 프론트엔드 정적 콘텐츠로 관리한다. 서버는 문서 본문을 저장하거나 조회 API로 제공하지 않는다. 동의 코드 3종과 version=1만 고정 계약으로 검증한다.
 
 [개발 프롬프트 SQL](../db/dev/seed-draft-call-prompts.sql)은 DRAFT다. 실제 모델/API/voice와 안전성을 검수한 뒤 [PromptPublicationService](../src/main/java/com/safecall/service/call/service/PromptPublicationService.java)로 4개 상황 × 3개 상대의 12개 조합을 발행한다. 이전 PUBLISHED는 RETIRED로 전환하며 기존 통화는 자신의 releaseId를 유지한다.
 

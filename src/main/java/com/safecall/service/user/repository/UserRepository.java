@@ -20,7 +20,6 @@ public class UserRepository {
 		this.jdbc=jdbc;this.crypto=crypto;this.keys=keys;
 	}
 	public record Contact(UUID id, int slot, byte[] name, byte[] relationship, byte[] phone, byte[] phoneHash, long version) {}
-	public record Document(String code, int version, String title, String body, boolean isConsent, boolean isRequired, Instant publishedAt) {}
 	public record Event(String action, int version, Instant recordedAt) {}
 	private static UUID id(ResultSet r, String name) throws SQLException {
 		var b = ByteBuffer.wrap(r.getBytes(name)); return new UUID(b.getLong(), b.getLong());
@@ -66,16 +65,6 @@ public class UserRepository {
 	public void updateSettings(UUID user, AlertMode mode, Instant now,long expectedVersion) {
 		jdbc.update("UPDATE `userSetting` SET `incomingAlertMode`=?,`updatedAt`=?,`version`=`version`+1 WHERE `userId`=? AND `version`=?",
 			mode.name(), time(now), bin(user),expectedVersion);
-	}
-	public List<Document> documents(boolean isLock) {
-		return jdbc.query("SELECT * FROM `serviceDocument` WHERE `isCurrent`=1 ORDER BY `code`" + (isLock ? " FOR SHARE" : ""),
-			(r,n) -> new Document(r.getString("code"),r.getInt("version"),r.getString("title"),r.getString("body"),
-				r.getBoolean("isConsent"),r.getBoolean("isRequired"),instant(r,"publishedAt")));
-	}
-	public Document document(String code,Integer version) {
-		var rows=jdbc.query("SELECT * FROM `serviceDocument` WHERE `code`=? AND "+(version==null?"`isCurrent`=1":"`version`=?"),
-			(r,n)->new Document(r.getString("code"),r.getInt("version"),r.getString("title"),r.getString("body"),r.getBoolean("isConsent"),r.getBoolean("isRequired"),instant(r,"publishedAt")),version==null?new Object[]{code}:new Object[]{code,version});
-		return rows.isEmpty()?null:rows.getFirst();
 	}
 	public Event latest(UUID user, String code) {
 		var rows = jdbc.query("""

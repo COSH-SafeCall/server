@@ -1,74 +1,70 @@
 {
   "schema_matches_final": true,
-  "schema_sha256": "fbde83830a69900f9e50e9c328e885e2b53c13613a82e55be1c876aee1ada79b",
+  "schema_sha256": "2b71b00bb55594520378971c923903b77a27b9f4c980f0ff4fc1f69774761a96",
   "tasks": {
     "test": {
-      "tests": 56,
+      "tests": 60,
       "failures": 0,
       "errors": 0,
       "skipped": 0,
-      "latest_suite_timestamp": "2026-09-14T09:00:29.989Z"
+      "latest_suite_timestamp": "2026-09-14T19:31:37.188Z"
     },
     "integrationTest": {
-      "tests": 154,
+      "tests": 153,
       "failures": 0,
       "errors": 0,
       "skipped": 0,
-      "latest_suite_timestamp": "2026-09-14T09:00:38.439Z"
+      "latest_suite_timestamp": "2026-09-14T19:31:48.047Z"
     }
   },
-  "tested_worktree_base": "26f0286f7b3e1776891b111f5632008369d5cd0b",
+  "tested_worktree_base": "d3a667870553f7c380f01bf8f047b63398395ec8",
   "schema_counts": {
-    "tables": 20,
-    "columns": 197,
-    "constraints": 174
+    "tables": 18,
+    "columns": 181,
+    "constraints": 155
   },
-  "schema_path": "current db/schema-mysql.sql on disposable MySQL",
-  "migration_path_rerun_this_revision": false,
+  "schema_path": "previous develop static-document schema plus client-onboarding migration on disposable MySQL",
+  "migration_path_rerun_this_revision": true,
   "external_providers": "mocked",
   "regressions": [
-    "blockedAccountCleanupDoesNotDelayCallIssuanceOrExpiry",
-    "blockedKeyDisposalDoesNotBlockExpiryCommitOrNewCall"
+    "oauthAuthenticatesWithoutConsentOrProfileWrites",
+    "freshLoginCanSaveConsentProfileAndContactsWithPartialRetry",
+    "ordinaryReloginPreservesConsentAndProfileWithoutAutoGrant",
+    "onboardingRoutesAndSessionStepAreRemoved",
+    "accountWithoutCompletedProfileIsNotDeletedAfter24Hours",
+    "accountRollbackPreservesActiveStatusEvenWhenCompletedSessionsWerePurged"
   ],
   "migration_verification": {
-    "scope": "Earlier 208-test run, before scheduling isolation; not a 210-test migration run",
-    "tested_worktree_base": "26f0286f7b3e1776891b111f5632008369d5cd0b",
-    "schema_path": "base 1f9b49c DDL plus all four migrations",
-    "schema_sha256": "fbde83830a69900f9e50e9c328e885e2b53c13613a82e55be1c876aee1ada79b",
-    "tasks": {
-      "test": {
-        "tests": 56,
-        "failures": 0,
-        "errors": 0,
-        "skipped": 0,
-        "latest_suite_timestamp": "2026-09-13T19:07:23.338Z"
-      },
-      "integrationTest": {
-        "tests": 152,
-        "failures": 0,
-        "errors": 0,
-        "skipped": 0,
-        "latest_suite_timestamp": "2026-09-13T19:07:35.236Z"
-      }
-    },
+    "scope": "Existing static-document DDL migrated, preservation checks then full HTTP integration suite on isolated MySQL",
+    "tested_worktree_base": "d3a667870553f7c380f01bf8f047b63398395ec8",
+    "previous_schema_sha256": "b693349227c10471abc8b4a5374ede643d3dc4830fd98ac14385e0196f6083c3",
     "migrations": [
-      "20260913-key-discard-job.sql",
-      "20260914-call-prompt-anchor.sql",
-      "20260914-grant-issuing-start.sql",
-      "20260914-account-external-retry.sql"
+      "20260915-client-onboarding.sql"
+    ],
+    "checks": [
+      "profile/contact/consent/deletion jobs preserved",
+      "ONBOARDING accounts mapped to ACTIVE without automatic consent or profile confirmation",
+      "DELETION_PENDING accounts preserved",
+      "pending OAuth expired, sessions preserved",
+      "oauthConsent and webSession onboardingStep/version removed",
+      "new account default ACTIVE",
+      "full integration suite including encrypted legacy deletion rollback state passed"
     ]
   },
   "swagger_display_verification": {
-    "operations": 33,
-    "groups": 11,
-    "method": "Actual test-server OpenAPI and Swagger initializer fetched; initializer comparator executed in Node.js",
+    "operations": 30,
+    "groups": 10,
+    "method": "Actual test-server OpenAPI checked by integration test; design routes checked by verification script",
     "browser_render_checked": false,
     "checks": [
-      "all operations grouped exactly once",
-      "A05 first",
-      "U09 before U10",
-      "C01 through C07",
-      "no URL sorter override"
+      "U03, A06, A07 paths absent",
+      "A02 decisions field absent and legacy request rejected",
+      "30 unique design operations",
+      "required renewal path present"
     ]
+  },
+  "design_verification": {
+    "passed": 75,
+    "mysql_version": "8.0.41"
   }
 }

@@ -41,17 +41,14 @@ public class HttpGeminiClient implements GeminiClient {
 	@Override public String issue(IssueRequest request) {
 		if (!isConfigured()) throw new IssueException(false);
 		if (!"v1beta".equals(request.apiVersion())) throw new IssueException(false);
-		if (!List.of("INITIAL","RESUME").contains(request.purpose()) || request.instruction()==null || request.instruction().isBlank()) throw new IssueException(false);
+		if (request.instruction()==null || request.instruction().isBlank()) throw new IssueException(false);
 		// Match the provider SDK wire format: protect model/voice/instructions and disabled tools,
-		// while allowing the browser-only sessionResumption.handle on connection replacement.
+		// while preventing the browser from changing the reviewed setup.
 		var setup=new java.util.LinkedHashMap<String,Object>();
 		setup.put("model",request.model());
 		setup.put("generationConfig",Map.of("responseModalities",List.of("AUDIO"),"speechConfig",Map.of("voiceConfig",Map.of("prebuiltVoiceConfig",Map.of("voiceName",request.voiceId())))));
-		setup.put("sessionResumption",Map.of());
 		if(request.instruction()!=null)setup.put("systemInstruction",Map.of("parts",List.of(Map.of("text",request.instruction()))));
-		String mask="model,generationConfig,systemInstruction,sessionResumption,tools,contextWindowCompression,inputAudioTranscription,outputAudioTranscription";
-		// A masked empty message overwrites the browser's handle. Only INITIAL locks that field.
-		if(request.purpose().equals("RESUME"))mask=mask.replace(",sessionResumption","");
+		String mask="model,generationConfig,systemInstruction,tools,contextWindowCompression,inputAudioTranscription,outputAudioTranscription";
 		var body=Map.of("uses",1,"expireTime",request.expiresAt().toString(),"newSessionExpireTime",request.newSessionExpiresAt().toString(),"bidiGenerateContentSetup",setup,"fieldMask",mask);
 		try {
 			return client.post().uri(endpoint).header("x-goog-api-key",apiKey).contentType(MediaType.APPLICATION_JSON)

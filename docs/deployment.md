@@ -26,7 +26,7 @@ local/prod를 함께 활성화하면 실패한다. 환경변수별 의미는 [�
 | HTTPS·프록시 | 단일 WEB_ORIGIN, 전달 헤더 미신뢰, getRemoteAddr 기반 제한 | 실제 인입 프록시와 직접 접근 제한, 신뢰 범위에 맞춘 클라이언트 IP 추출 |
 | 웹 보안 | 보안 쿠키, CSRF/Origin, CSP nonce, Permissions-Policy | 배포 HTML에 nonce 연결, 브라우저 검수, callback의 SPA fallback 제외 |
 | 카카오 | authorization 시작·code 교환·callback·REAUTH 구현 | 운영 앱의 정확한 HTTPS callback 등록, scope·동일 계정 재인증 검수 |
-| Gemini | 단기 token·연결 제약·재개 처리 | 출시 모델/API/voice/instruction/resumption 검수 자료와 설정 대조 |
+| Gemini | 단기 token·연결 제약·종료 처리 | 출시 모델/API/voice/instruction 검수 자료와 설정 대조 |
 | 안심 메시지 | M01 작성 자료·자격 재검증, 미설정 지도 템플릿은 null | Naver 템플릿·좌표 순서·HTTPS 호스트·지원 브라우저 검수 후 MESSAGE_MAP_* 등록. 실제 작성 화면·위치 취득 검수 |
 | ACCOUNT 삭제 | 로컬 삭제+LOCAL_DELETED, 별도 암호문과 선점 기한, 카카오 연결 해제 재시도·R03 조회 | 서버 전용 KAKAO_ADMIN_KEY, 실제 앱 연결 해제·다중 worker 장애·외부 키 폐기 검수 |
 | 복구·관측 | 정리 작업 및 안전한 오류 응답 | 상태 확인, 여러 서버의 작업 경쟁, DB·외부 키 백업 복원과 삭제 기록 재적용 검수 |

@@ -39,8 +39,7 @@ public class AuthRepository {
 		return result.isEmpty() ? null : result.getFirst();
 	}
 	private static final RowMapper<Session> SESSION = (r,n) -> new Session(uuid(r,"id"), r.getBytes("sessionHash"),
-		r.getBytes("csrfHash"), uuid(r,"userId"), r.getString("kind"), Step.valueOf(r.getString("onboardingStep")),
-		r.getLong("version"), r.getString("status"), instant(r,"createdAt"), instant(r,"expiresAt"), instant(r,"sensitiveVerifiedAt"));
+		r.getBytes("csrfHash"), uuid(r,"userId"), r.getString("kind"), r.getString("status"), instant(r,"createdAt"), instant(r,"expiresAt"), instant(r,"sensitiveVerifiedAt"));
 	private static final RowMapper<User> USER = (r,n) -> new User(uuid(r,"id"), r.getString("status"), r.getString("keyRef"),
 		r.getBytes("nameCipher"), r.getBytes("genderCipher"), r.getBytes("birthDateCipher"), r.getBytes("phoneCipher"),
 		r.getString("genderSource"), r.getString("birthDateSource"), instant(r,"profileConfirmedAt"), r.getLong("version"));
@@ -75,9 +74,9 @@ public class AuthRepository {
 		user(snapshot.userId(),true);
 		return one("SELECT * FROM `webSession` WHERE `id`=? FOR UPDATE",SESSION,bin(id));
 	}
-	public void createSession(UUID id,UUID user,String kind,Step step,byte[] hash,byte[] csrf,Instant now,Instant expiry,Instant verified) {
-		jdbc.update("INSERT INTO `webSession` (`id`,`sessionHash`,`csrfHash`,`userId`,`kind`,`onboardingStep`,`createdAt`,`expiresAt`,`sensitiveVerifiedAt`) VALUES (?,?,?,?,?,?,?,?,?)",
-			bin(id),hash,csrf,bin(user),kind,step.name(),time(now),time(expiry),time(verified));
+	public void createSession(UUID id,UUID user,String kind,byte[] hash,byte[] csrf,Instant now,Instant expiry,Instant verified) {
+		jdbc.update("INSERT INTO `webSession` (`id`,`sessionHash`,`csrfHash`,`userId`,`kind`,`createdAt`,`expiresAt`,`sensitiveVerifiedAt`) VALUES (?,?,?,?,?,?,?,?)",
+			bin(id),hash,csrf,bin(user),kind,time(now),time(expiry),time(verified));
 	}
 	public void endSession(Session session, Instant now, String status, String reason, byte[] eventHash) {
 		jdbc.update("UPDATE `webSession` SET `status`=?,`revokedAt`=? WHERE `id`=?",
@@ -116,24 +115,6 @@ public class AuthRepository {
 			VALUES (?,?,?,?,?,?,?,'DONE',?,?,?,?,?)
 			""", bin(id), bin(session.userId()), bin(session.id()), scope, operation, bin(key), requestHash,
 			bin(resourceId), response, time(responseExpiry), time(now), time(now.plusSeconds(86400)));
-	}
-	public List<String> missingConsents(UUID userId) {
-		if (userId == null) return List.of();
-		return List.of("PRIVACY_PROCESSING", "AI_CALL").stream().filter(code -> !Boolean.TRUE.equals(jdbc.queryForObject("""
-			SELECT EXISTS(SELECT 1 FROM `serviceDocument` d
-			WHERE d.`code`=? AND d.`isCurrent`=1 AND d.`isRequired`=1 AND d.`isConsent`=1
-			AND EXISTS(SELECT 1 FROM `consentEvent` e WHERE e.`id`=(
-				SELECT e2.`id` FROM `consentEvent` e2 WHERE e2.`userId`=? AND e2.`documentCode`=d.`code`
-				ORDER BY e2.`recordedAt` DESC,e2.`id` DESC LIMIT 1)
-			AND e.`action`='GRANTED' AND e.`documentVersion`=d.`version`))
-			""", Boolean.class, code, bin(userId)))).toList();
-	}
-	public void advance(Session session, Step next, Instant now) {
-		jdbc.update("UPDATE `webSession` SET `onboardingStep`=?,`version`=`version`+1 WHERE `id`=? AND `version`=?", next.name(), bin(session.id()),session.version());
-		if (next == Step.COMPLETE && session.userId() != null) {
-			jdbc.update("UPDATE `appUser` SET `status`='ACTIVE',`updatedAt`=?,`version`=`version`+1 WHERE `id`=?",
-				time(now), bin(session.userId()));
-		}
 	}
 	public void observe(Session session, String category, String code, Boolean isSuccess, Instant now) {
 		jdbc.update("""

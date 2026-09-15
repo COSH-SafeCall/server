@@ -33,12 +33,13 @@ public final class UserDtos {
 	}
 	public record SettingRequest(@NotNull AlertMode incomingAlertMode, @NotNull @Positive Long expectedVersion) {}
 	public record SettingView(AlertMode incomingAlertMode, long version) {}
-	public record DocumentView(String code, int version, String title, String body,
-		boolean isConsent, boolean isRequired, Instant publishedAt) {}
-	public record Decision(@NotBlank @Size(max=24) String code, @NotNull @Positive Integer version,
+	public record Decision(@NotBlank @Size(max=24) String code,
+		@NotNull @Positive @io.swagger.v3.oas.annotations.media.Schema(allowableValues="1",example="1") Integer version,
 		@NotNull DecisionAction action) {}
 	public record DecisionsRequest(@NotNull @Size(min=1,max=3) List<@NotNull @Valid Decision> decisions) {}
-	public record ConsentView(String code, int currentVersion, Integer decisionVersion, String action, boolean isEffective, Instant recordedAt) {}
+	public record ConsentView(String code,
+		@io.swagger.v3.oas.annotations.media.Schema(allowableValues="1",example="1") int currentVersion,
+		Integer decisionVersion, String action, boolean isEffective, Instant recordedAt) {}
 	public record WithdrawRequest() {}
 	public record DeleteContactRequest(@NotNull @Positive Long expectedVersion) {}
 	public record DeletionView(UUID id,
