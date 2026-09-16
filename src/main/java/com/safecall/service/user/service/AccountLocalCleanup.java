@@ -2,89 +2,93 @@ package com.safecall.service.user.service;
 
 import static com.safecall.service.auth.repository.AuthRepository.bin;
 import static com.safecall.service.auth.repository.AuthRepository.time;
+
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.time.Clock;
-import java.util.*;
+import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.json.JsonMapper;
 import com.safecall.service.auth.repository.AuthRepository;
-import com.safecall.service.common.crypto.*;
-import com.safecall.service.user.api.UserDtos.DeletionReceipt;
+import com.safecall.service.common.crypto.SecretCrypto;
+import com.safecall.service.common.crypto.TransientKeys;
+import com.safecall.service.history.service.LocalDeletionTransactions;
 import com.safecall.service.user.repository.UserRepository;
 
-/** U06/R02 ACCOUNT의 로컬 삭제. 외부 정리는 별도 worker가 커밋 이후 수행한다. */
 @Component
 public class AccountLocalCleanup {
 	private final JdbcTemplate jdbc;
 	private final AuthRepository auth;
 	private final UserRepository users;
 	private final SecretCrypto crypto;
-	private final UserKeyStore userKeys;
 	private final TransientKeys temporaryKeys;
-	private final JsonMapper mapper;
 	private final Clock clock;
-	private final com.safecall.service.history.service.LocalDeletionTransactions deletionTransactions;
+	private final LocalDeletionTransactions deletionTransactions;
 
-	public AccountLocalCleanup(JdbcTemplate jdbc,AuthRepository auth,UserRepository users,SecretCrypto crypto,
-		UserKeyStore userKeys,TransientKeys temporaryKeys,JsonMapper mapper,Clock clock,
-		com.safecall.service.history.service.LocalDeletionTransactions deletionTransactions) {
-		this.jdbc=jdbc;this.auth=auth;this.users=users;this.crypto=crypto;this.userKeys=userKeys;
-		this.temporaryKeys=temporaryKeys;this.mapper=mapper;this.clock=clock;
-		this.deletionTransactions=deletionTransactions;
+	public AccountLocalCleanup(JdbcTemplate jdbc, AuthRepository auth, UserRepository users, SecretCrypto crypto,
+		TransientKeys temporaryKeys, Clock clock, LocalDeletionTransactions deletionTransactions) {
+		this.jdbc = jdbc;
+		this.auth = auth;
+		this.users = users;
+		this.crypto = crypto;
+		this.temporaryKeys = temporaryKeys;
+		this.clock = clock;
+		this.deletionTransactions = deletionTransactions;
 	}
 
-	@Scheduled(scheduler="cleanupScheduler",fixedDelayString="${app.auth.cleanup-delay-ms}",initialDelayString="${app.auth.cleanup-delay-ms}")
+	@Scheduled(scheduler = "cleanupScheduler", fixedDelayString = "${app.auth.cleanup-delay-ms}", initialDelayString = "${app.auth.cleanup-delay-ms}")
 	public void run() {
 		try {
-			// Preserve the complete 60 second receipt replay window before account rows disappear.
-			var jobs=jdbc.queryForList("SELECT `id`,`userId` FROM `deletionJob` WHERE `scope`='ACCOUNT' AND `status`='PENDING' AND `requestedAt`<=? LIMIT 100",
+			var jobs = jdbc.queryForList("SELECT `id`,`userId` FROM `deletionJob` WHERE `scope`='ACCOUNT' AND `status`='PENDING' AND `requestedAt`<=? LIMIT 100",
 				time(clock.instant().minusSeconds(60)));
-			for(var job:jobs) {
-				if(job.get("userId")!=null)deletionTransactions.execute(uuid((byte[])job.get("id")),uuid((byte[])job.get("userId")),
-					()->deleteLocal((byte[])job.get("id"),(byte[])job.get("userId")));
+			for (var job : jobs) {
+				if (job.get("userId") != null) {
+					deletionTransactions.execute(uuid((byte[]) job.get("id")), uuid((byte[]) job.get("userId")),
+						() -> deleteLocal((byte[]) job.get("id"), (byte[]) job.get("userId")));
+				}
 			}
-		} catch(RuntimeException ex) {failure();}
-	}
-
-	private void deleteLocal(byte[] jobId,byte[] owner) {
-		if(owner==null)return;
-		UUID userId=uuid(owner);var user=auth.user(userId,true);
-		if(user==null)return;
-		var jobs=jdbc.queryForList("SELECT `status`,`cleanupKeyRef` FROM `deletionJob` WHERE `id`=? FOR UPDATE",jobId);
-		if(jobs.isEmpty() || !jobs.getFirst().get("status").equals("PENDING"))return;
-		if(Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM `apiIdempotency` WHERE `resourceId`=? AND `responseExpiresAt`>?)",Boolean.class,jobId,time(clock.instant()))))return;
-		// External cleanup must remain possible after the personal decryption key is discarded.
-		byte[] subjectCipher=jdbc.queryForObject("SELECT `kakaoSubjectCipher` FROM `appUser` WHERE `id`=?",byte[].class,owner);
-		String subject=new String(crypto.open(userKeys.read(user.keyRef()),userId+":subject",subjectCipher),StandardCharsets.UTF_8);
-		String cleanupRef=temporaryKeys.create(UUID.randomUUID());
-		byte[] cleanupCipher=crypto.seal(temporaryKeys.read(cleanupRef),"ACCOUNT_CLEANUP:"+uuid(jobId),
-			mapper.writeValueAsBytes(Map.of("subject",subject,"userKeyRef",user.keyRef())));
-		removeRate(crypto.hash("CALL_RATE",userId.toString()));
-		for(UUID sessionId:users.sessions(userId)) {
-			auth.lockSession(sessionId);
-			removeRate(crypto.hash("CALL_RATE",sessionId.toString()));
-			removeRate(crypto.hash("TELEMETRY_RATE",sessionId.toString()));
-			for(byte[] call:jdbc.queryForList("SELECT `id` FROM `callSession` WHERE `sessionId`=?",byte[].class,bin(sessionId)))
-				removeRate(crypto.hash("RENEW_RATE",uuid(call).toString()));
+		} catch (RuntimeException exception) {
+			org.slf4j.LoggerFactory.getLogger(getClass()).error("Account deletion will retry its remaining work.");
 		}
-		jdbc.queryForList("SELECT g.`keyRef` FROM `connectionGrant` g JOIN `callSession` c ON c.`id`=g.`callId` JOIN `webSession` s ON s.`id`=c.`sessionId` WHERE s.`userId`=? AND g.`keyRef` IS NOT NULL",String.class,owner)
-			.forEach(temporaryKeys::discardAfterCommit);
-		jdbc.update("DELETE FROM `webSession` WHERE `userId`=?",owner);
-		jdbc.update("UPDATE `deletionJob` SET `status`='COMPLETED',`completedAt`=?,`cleanupCipher`=NULL,`cleanupKeyRef`=NULL WHERE `userId`=? AND `scope` IN ('AI_DATA','LOCATION_DATA','USAGE_HISTORY') AND `pendingMarker`=1",time(clock.instant()),owner);
-		jdbc.update("DELETE FROM `appUser` WHERE `id`=?",owner);
-		jdbc.update("UPDATE `deletionJob` SET `status`='LOCAL_DELETED',`cleanupCipher`=?,`cleanupKeyRef`=? WHERE `id`=?",cleanupCipher,cleanupRef,jobId);
-		temporaryKeys.discardAfterCommit((String)jobs.getFirst().get("cleanupKeyRef"));
-		temporaryKeys.discardAfterCommit(user.keyRef());
-		// Do not mark COMPLETED here: Kakao unlink and external cleanup have not completed.
 	}
 
-	private void removeRate(byte[] hash) {jdbc.update("DELETE FROM `rateBucket` WHERE `scopeHash`=?",hash);}
-	private static UUID uuid(byte[] bytes) {var b=ByteBuffer.wrap(bytes);return new UUID(b.getLong(),b.getLong());}
-	private void failure() {
-		// A failed/uncertain commit is re-read on the next cycle; never claim that deleted data survived.
-		org.slf4j.LoggerFactory.getLogger(getClass()).error("Local account cleanup will recheck its transaction outcome.");
+	private void deleteLocal(byte[] jobId, byte[] owner) {
+		UUID userId = uuid(owner);
+		var user = auth.user(userId, true);
+		if (user == null) {
+			return;
+		}
+		var jobs = jdbc.queryForList("SELECT `status` FROM `deletionJob` WHERE `id`=? FOR UPDATE", jobId);
+		if (jobs.isEmpty() || !"PENDING".equals(jobs.getFirst().get("status"))) {
+			return;
+		}
+		if (Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM `apiIdempotency` WHERE `resourceId`=? AND `responseExpiresAt`>?)",
+			Boolean.class, jobId, time(clock.instant())))) {
+			return;
+		}
+		removeRate(crypto.hash("CALL_RATE", userId.toString()));
+		for (UUID sessionId : users.sessions(userId)) {
+			auth.lockSession(sessionId);
+			removeRate(crypto.hash("CALL_RATE", sessionId.toString()));
+			removeRate(crypto.hash("TELEMETRY_RATE", sessionId.toString()));
+			for (byte[] call : jdbc.queryForList("SELECT `id` FROM `callSession` WHERE `sessionId`=?", byte[].class, bin(sessionId))) {
+				removeRate(crypto.hash("RENEW_RATE", uuid(call).toString()));
+			}
+		}
+		jdbc.queryForList("SELECT g.`keyRef` FROM `connectionGrant` g JOIN `callSession` c ON c.`id`=g.`callId` JOIN `webSession` s ON s.`id`=c.`sessionId` WHERE s.`userId`=? AND g.`keyRef` IS NOT NULL",
+			String.class, owner).forEach(temporaryKeys::discardAfterCommit);
+		jdbc.update("DELETE FROM `webSession` WHERE `userId`=?", owner);
+		jdbc.update("DELETE FROM `appUser` WHERE `id`=?", owner);
+		jdbc.update("UPDATE `deletionJob` SET `status`='COMPLETED',`completedAt`=?,`errorCode`=NULL WHERE `id`=?", time(clock.instant()), jobId);
+		temporaryKeys.discardAfterCommit(user.keyRef());
+	}
+
+	private void removeRate(byte[] hash) {
+		jdbc.update("DELETE FROM `rateBucket` WHERE `scopeHash`=?", hash);
+	}
+
+	private static UUID uuid(byte[] bytes) {
+		var buffer = ByteBuffer.wrap(bytes);
+		return new UUID(buffer.getLong(), buffer.getLong());
 	}
 }

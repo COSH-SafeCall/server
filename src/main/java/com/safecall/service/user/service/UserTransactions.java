@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
+import com.safecall.service.auth.api.AuthDtos.Permission;
 import com.safecall.service.auth.api.AuthDtos.ProfileView;
 import com.safecall.service.auth.repository.AuthRepository;
 import com.safecall.service.auth.repository.AuthRows.*;
@@ -33,8 +34,7 @@ public class UserTransactions {
 		this.crypto=crypto; this.mapper=mapper; this.clock=clock;
 	}
 	private Instant now() { return clock.instant().truncatedTo(ChronoUnit.MICROS); }
-	private Session member(String access) { Session s=authentication.member(access,false);
-		if(!valid(s.userId(),"PRIVACY_PROCESSING"))throw new CustomException(ErrorCode.CONSENT_REQUIRED);return s; }
+	private Session member(String access) { return authentication.member(access,false); }
 	private User user(Session session) { return auth.user(session.userId(),false); }
 	private byte[] seal(byte[] key, UUID owner, String field, String value) {
 		return crypto.seal(key,owner+":"+field,value==null ? null : value.getBytes(StandardCharsets.UTF_8));
@@ -47,19 +47,16 @@ public class UserTransactions {
 	}
 	public ProfileView profile(String access) {
 		Session session=authentication.member(access,false); User user=user(session);
-		if(!valid(user.id(),"PRIVACY_PROCESSING"))
-			return new ProfileView(null,null,null,null,"UNKNOWN","UNKNOWN",List.of("name","phone"),null,user.version());
 		return profile(user);
 	}
 	private ProfileView profile(User user) {
 		byte[] key=keys.read(user.keyRef());
-		boolean aiAllowed=valid(user.id(),"AI_CALL");
-		String gender=aiAllowed?open(key,user.id(),"gender",user.genderCipher()):null;
-		String birth=aiAllowed?open(key,user.id(),"birthDate",user.birthDateCipher()):null;
+		String gender=open(key,user.id(),"gender",user.genderCipher());
+		String birth=open(key,user.id(),"birthDate",user.birthDateCipher());
 		List<String> missing=new ArrayList<>();if(user.nameCipher()==null)missing.add("name");if(user.phoneCipher()==null)missing.add("phone");
 		return new ProfileView(open(key,user.id(),"name",user.nameCipher()),gender,
 			birth==null ? null : LocalDate.parse(birth),open(key,user.id(),"phone",user.phoneCipher()),
-			aiAllowed?user.genderSource():"UNKNOWN",aiAllowed?user.birthDateSource():"UNKNOWN",missing,user.confirmedAt(),user.version());
+			user.genderSource(),user.birthDateSource(),missing,user.confirmedAt(),user.version());
 	}
 	public ProfileView updateProfile(String access, ProfileRequest input,UUID key) {
 		Session session=member(access); User user=user(session);
@@ -70,15 +67,10 @@ public class UserTransactions {
 		String name=UserValues.text(request.name(),50), phone=UserValues.phone(request.phone());
 		LocalDate birth=UserValues.birthDate(request.birthDate(),LocalDate.ofInstant(now(),ZoneOffset.UTC));
 		String gender=request.gender()==null ? null : request.gender().name();
-		if (gender!=null || birth!=null) {
-			if (repository.pending(user.id(),"AI_DATA")) throw new CustomException(ErrorCode.DATA_CLEANUP_PENDING);
-			if (!valid(user.id(),"AI_CALL")) throw new CustomException(ErrorCode.CONSENT_REQUIRED);
-		}
 		byte[] hash=crypto.hash("PHONE_MATCH:"+user.id(),phone);
 		if (repository.contacts(user.id()).stream().anyMatch(c -> crypto.isEqual(hash,c.phoneHash()))) throw new CustomException(ErrorCode.CONTACT_PHONE_CONFLICT);
-		ProfileView old=profile(user);
-		String genderSource=gender==null ? "UNKNOWN" : Objects.equals(gender,old.gender()) && "KAKAO".equals(old.genderSource()) ? "KAKAO" : "USER_CONFIRMED";
-		String birthSource=birth==null ? "UNKNOWN" : Objects.equals(birth,old.birthDate()) && "KAKAO".equals(old.birthDateSource()) ? "KAKAO" : "USER_CONFIRMED";
+		String genderSource=gender==null ? "UNKNOWN" : "USER_CONFIRMED";
+		String birthSource=birth==null ? "UNKNOWN" : "USER_CONFIRMED";
 		byte[] secret=keys.read(user.keyRef());
 		repository.updateProfile(user.id(),seal(secret,user.id(),"name",name),seal(secret,user.id(),"gender",gender),
 			seal(secret,user.id(),"birthDate",birth==null ? null : birth.toString()),seal(secret,user.id(),"phone",phone),hash,genderSource,birthSource,now(),request.expectedVersion());
@@ -145,65 +137,33 @@ public class UserTransactions {
 		try { repository.updateSettings(user,request.incomingAlertMode(),now(),request.expectedVersion()); save(session,"SETTINGS_UPDATE",key,request,user,null); return repository.settings(user); }
 		catch (org.springframework.dao.DataAccessException exception) { throw new CustomException(ErrorCode.SETTINGS_SAVE_FAILED); }
 	}
-	public Items<ConsentView> consents(String access) { return consentViews(authentication.member(access,false).userId()); }
-	private Items<ConsentView> consentViews(UUID user) {
-		return new Items<>(ConsentPolicy.CODES.stream().map(code -> {
-			Event latest=repository.latest(user,code);
-			return new ConsentView(code,ConsentPolicy.VERSION,latest==null?null:latest.version(),latest==null?null:latest.action(),
-				latest!=null && latest.action().equals("GRANTED") && latest.version()==ConsentPolicy.VERSION,latest==null?null:latest.recordedAt());
-		}).toList());
+	public Items<PermissionView> permissions(String access) {
+		return permissionViews(authentication.member(access,false).userId());
 	}
-	private boolean valid(UUID user, String code) {
-		return consentViews(user).items().stream().anyMatch(c -> c.code().equals(code) && c.isEffective());
+	private Items<PermissionView> permissionViews(UUID user) {
+		var state=repository.permissions(user);
+		return new Items<>(List.of(new PermissionView(PermissionCode.MICROPHONE,state.microphone(),state.updatedAt()),
+			new PermissionView(PermissionCode.LOCATION,state.location(),state.updatedAt())));
 	}
-	public Items<ConsentView> decide(String access, DecisionsRequest input, UUID key) {
-		Session session=authentication.member(access,false); UUID user=session.userId();
-		var request=new DecisionsRequest(input.decisions().stream().sorted(Comparator.comparing(Decision::code)).toList());
-		if (request.decisions().stream().map(Decision::code).distinct().count()!=request.decisions().size()) throw new CustomException(ErrorCode.INVALID_CONSENT);
-		if (replay(session,"CONSENT_UPDATE",key,request)!=null) return consentViews(user);
-		for (Decision decision:request.decisions()) {
-			ConsentPolicy.require(decision.code(),decision.version());
-			String cleanupScope=switch(decision.code()){case "AI_CALL"->"AI_DATA";case "LOCATION_PROCESSING"->"LOCATION_DATA";default->"ACCOUNT";};
-			if (decision.action()==DecisionAction.GRANTED && (repository.pending(user,"ACCOUNT") || repository.pending(user,cleanupScope))) throw new CustomException(ErrorCode.DATA_CLEANUP_PENDING);
-			Event previous=repository.latest(user,decision.code());
-			if (decision.action()==DecisionAction.DECLINED && previous!=null && previous.action().equals("GRANTED")) throw new CustomException(ErrorCode.WITHDRAWAL_REQUIRED);
+	public Items<PermissionView> updatePermissions(String access,PermissionsRequest input,UUID key) {
+		Session session=authentication.member(access,false);UUID user=session.userId();
+		var request=new PermissionsRequest(input.permissions().stream().sorted(Comparator.comparing(PermissionDecision::code)).toList());
+		if(request.permissions().stream().map(PermissionDecision::code).distinct().count()!=request.permissions().size())throw new CustomException(ErrorCode.INVALID_REQUEST);
+		if(replay(session,"PERMISSIONS_UPDATE",key,request)!=null)return permissionViews(user);
+		Permission microphone=null,location=null;
+		for(var permission:request.permissions()) {
+			if(permission.code()==PermissionCode.MICROPHONE)microphone=permission.status();
+			else location=permission.status();
 		}
-		for (Decision decision:request.decisions()) repository.decision(user,decision.code(),decision.version(),decision.action().name(),now());
-		save(session,"CONSENT_UPDATE",key,request,user,null); return consentViews(user);
+		repository.updatePermissions(user,microphone,location,now());
+		save(session,"PERMISSIONS_UPDATE",key,request,user,null);
+		return permissionViews(user);
 	}
-	public WithdrawalResult withdraw(String access, String code, WithdrawRequest body, UUID key) {
-		Session session=authentication.member(access,true); UUID user=session.userId();
-		ConsentPolicy.requireCode(code);
-		var request=Map.of("code",code);
-		Replay replay=replay(session,"CONSENT_WITHDRAWAL",key,request);
-		if (replay!=null) {
-			if (replay.responseCipher()==null || replay.responseExpiresAt()==null || !replay.responseExpiresAt().isAfter(now())) throw new CustomException(ErrorCode.DELETION_RECEIPT_EXPIRED);
-			var saved=mapper.readValue(crypto.openResponse(replay.id().toString(),replay.responseCipher()),WithdrawalView.class);
-			return new WithdrawalResult(repository.deletionView(saved.deletion().id()),saved.deletion().receiptToken(),saved.deletion().receiptExpiresAt());
-		}
-		if ("DELETION_PENDING".equals(user(session).status())) throw new CustomException(ErrorCode.ACCOUNT_DELETION_PENDING);
-		if(code.equals("PRIVACY_PROCESSING"))authentication.requireSensitive(session);
-		String scope=switch(code) { case "PRIVACY_PROCESSING" -> "ACCOUNT"; case "AI_CALL" -> "AI_DATA"; default -> "LOCATION_DATA"; };
-		if (repository.pending(user,scope)) throw new CustomException(ErrorCode.DATA_CLEANUP_PENDING);
-		Instant now=now(); String receiptToken=crypto.randomToken();
-		var receipt=new DeletionReceipt(UUID.randomUUID(),scope,"PENDING",receiptToken,now.plusSeconds(86400),now.plusSeconds(30*86400));
-		repository.decision(user,code,ConsentPolicy.VERSION,"WITHDRAWN",now);
-		if (!scope.equals("LOCATION_DATA")) {
-			for (UUID id:repository.sessions(user)) {
-				Session locked=auth.lockSession(id);
-				if (locked!=null) auth.endCalls(locked,now,"CONSENT_WITHDRAWN",crypto.hash("SERVER_EVENT","CONSENT_WITHDRAWN"));
-			}
-		}
-		repository.deletion(user,receipt,crypto.hash("DELETION_RECEIPT",receiptToken),now);
-		var response=new WithdrawalView(code,"WITHDRAWN",receipt);
-		save(session,"CONSENT_WITHDRAWAL",key,request,receipt.id(),response); return new WithdrawalResult(repository.deletionView(receipt.id()),receiptToken,receipt.receiptExpiresAt());
-	}
-	public record WithdrawalResult(DeletionView view,String receiptToken,Instant receiptExpiresAt) {
-		@Override public String toString(){return "WithdrawalResult[redacted]";}
+	public record DeletionResult(DeletionView view,String receiptToken,Instant receiptExpiresAt) {
+		@Override public String toString(){return "DeletionResult[redacted]";}
 	}
 	private byte[] scope(Session session,String operation,Object request) {
-		String kind="COLLECTION",target=switch(operation){case "PROFILE_UPDATE"->"profile";case "CONSENT_UPDATE"->"consents";case "SETTINGS_UPDATE"->"settings";default->"emergency-contacts";};
-		if(operation.equals("CONSENT_WITHDRAWAL")){kind="DOCUMENT";target=((Map<?,?>)request).get("code").toString();}
+		String kind="COLLECTION",target=switch(operation){case "PROFILE_UPDATE"->"profile";case "PERMISSIONS_UPDATE"->"permissions";case "SETTINGS_UPDATE"->"settings";default->"emergency-contacts";};
 		if(operation.equals("CONTACT_UPDATE")||operation.equals("CONTACT_DELETE")){kind="CONTACT";target=((Map<?,?>)request).get("contactId").toString();}
 		return crypto.idempotency("USER",session.userId(),kind,target);
 	}

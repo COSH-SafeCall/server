@@ -23,11 +23,11 @@ public class AuthTransactions {
 	public record SessionResult(SessionView view,String cookie) {
 		@Override public String toString() { return "SessionResult[redacted]"; }
 	}
-	public SessionResult issue(UUID user,String kind,Instant verified,Instant expiry) {
+	public SessionResult issue(UUID user,String kind,Instant expiry) {
 		Instant now=now(); UUID id=UUID.randomUUID(); String cookie=crypto.randomToken();
-		repository.createSession(id,user,kind,crypto.hash("WEB_SESSION",cookie),crypto.hash("CSRF",crypto.csrf(id)),now,expiry,verified);
+		repository.createSession(id,user,kind,crypto.hash("WEB_SESSION",cookie),crypto.hash("CSRF",crypto.csrf(id)),now,expiry);
 		Session session=repository.session(id);
-		if(Set.of("KAKAO","GUEST").contains(kind))repository.observe(session,"AUTH","AUTH_SUCCEEDED",true,now);
+		if(Set.of("MEMBER","GUEST").contains(kind))repository.observe(session,"AUTH","AUTH_SUCCEEDED",true,now);
 		return new SessionResult(view(session),cookie);
 	}
 	public SessionResult bootstrap(String cookie) {
@@ -36,7 +36,7 @@ public class AuthTransactions {
 			return new SessionResult(view(s),null);
 		}
 		if(s!=null && s.status().equals("ACTIVE")) end(s,"EXPIRED","SESSION_EXPIRED");
-		return issue(null,"ANONYMOUS",null,now().plusSeconds(policy.anonymousSeconds()));
+		return issue(null,"ANONYMOUS",now().plusSeconds(policy.anonymousSeconds()));
 	}
 	private Session lookup(String cookie) {
 		if(cookie==null || !cookie.matches("[A-Za-z0-9_-]{43}"))return null;
@@ -67,9 +67,9 @@ public class AuthTransactions {
 	}
 	public SessionResult guest(String cookie) {
 		Session s=basic(cookie,false);
-		if(s.kind().equals("KAKAO"))throw new CustomException(ErrorCode.ALREADY_AUTHENTICATED);
+		if(s.kind().equals("MEMBER"))throw new CustomException(ErrorCode.ALREADY_AUTHENTICATED);
 		if(s.kind().equals("GUEST"))return new SessionResult(view(s),null);
-		end(s,"REVOKED","LOGOUT"); return issue(null,"GUEST",null,now().plusSeconds(policy.guestSeconds()));
+		end(s,"REVOKED","LOGOUT"); return issue(null,"GUEST",now().plusSeconds(policy.guestSeconds()));
 	}
 	public void logout(String cookie) {
 		if(cookie==null)return;
@@ -83,10 +83,5 @@ public class AuthTransactions {
 		Session s=repository.lockSession(id);
 		if(s!=null && s.status().equals("ACTIVE") && !s.expiresAt().isAfter(now()))end(s,"EXPIRED","SESSION_EXPIRED");
 	}
-	public void requireSensitive(Session session) {
-		Instant verified=session.sensitiveVerifiedAt();
-		if(verified==null || verified.isAfter(now()) || !verified.plusSeconds(policy.sensitiveSeconds()).isAfter(now()))
-			throw new CustomException(ErrorCode.REAUTHENTICATION_REQUIRED);
-	}
-	private SessionView view(Session s) { return new SessionView(s.kind(),s.kind().equals("KAKAO"),crypto.csrf(s.id()),s.expiresAt(),s.userId()==null?"LOGIN_ONLY":"MEMBER",null); }
+	private SessionView view(Session s) { return new SessionView(s.kind(),s.kind().equals("MEMBER"),crypto.csrf(s.id()),s.expiresAt(),s.userId()==null?"LOGIN_ONLY":"MEMBER"); }
 }

@@ -2,12 +2,14 @@ package com.safecall.service.home.service;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import com.safecall.service.auth.api.AuthDtos.Permission;
 import com.safecall.service.auth.repository.AuthRepository;
 import com.safecall.service.auth.service.AuthTransactions;
+import com.safecall.service.common.error.CustomException;
+import com.safecall.service.common.error.ErrorCode;
 import com.safecall.service.common.error.SessionInvalidException;
 import com.safecall.service.home.api.HomeDtos.*;
 import com.safecall.service.home.repository.HomeRepository;
@@ -32,24 +34,18 @@ public class HomeService {
 		var user=auth.user(session.userId(),false);
 		var reasons=new ArrayList<String>();
 		if (user.confirmedAt()==null || user.nameCipher()==null || user.phoneCipher()==null) reasons.add("PROFILE_REQUIRED");
-		// Message eligibility requires privacy consent, independently of AI call consent.
-		if (!isGranted(user.id(),"PRIVACY_PROCESSING")) reasons.add("CONSENT_REQUIRED");
 		if(repository.hasOpenCall(session.id()))reasons.add("CALL_ALREADY_OPEN");
-		if(users.pending(user.id(),"ACCOUNT") || users.pending(user.id(),"AI_DATA") || users.pending(user.id(),"LOCATION_DATA"))reasons.add("DATA_CLEANUP_PENDING");
+		if(users.pending(user.id(),"ACCOUNT"))reasons.add("DATA_CLEANUP_PENDING");
 		int count=repository.guardianCount(user.id());
 		if (count<1 || count>2) reasons.add("CONTACT_REQUIRED");
-		return new HomeView(reasons.isEmpty(),List.copyOf(reasons),isGranted(user.id(),"LOCATION_PROCESSING"),count,"MEMBER");
-	}
-	private boolean isGranted(UUID userId, String code) {
-		var event=users.latest(userId,code);
-		return event!=null && event.action().equals("GRANTED") && event.version()==com.safecall.service.user.service.ConsentPolicy.VERSION;
+		return new HomeView(reasons.isEmpty(),List.copyOf(reasons),users.permissions(user.id()).location()==Permission.GRANTED,count,"MEMBER");
 	}
 	public CallOptionsView callOptions(String access) {
 		// Authenticate before the controller evaluates If-None-Match, including 304 requests.
 		authentication.authenticated(access);
 		var scenarios=repository.scenarios();
 		var counterparts=repository.counterparts();
-		if (scenarios.size()!=4 || counterparts.size()!=3) throw new com.safecall.service.common.error.CustomException(com.safecall.service.common.error.ErrorCode.PROMPT_NOT_READY);
+		if (scenarios.size()!=4 || counterparts.size()!=3) throw new CustomException(ErrorCode.PROMPT_NOT_READY);
 		return new CallOptionsView(scenarios,counterparts,new QuickStart(1000,"FATHER"),CATALOG_VERSION);
 	}
 }

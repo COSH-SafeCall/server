@@ -6,23 +6,16 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
 import org.hibernate.annotations.Check;
 
-@Check(name = "ckAppUserEntity", constraints = "octet_length(`kakaoSubjectHash`)=32 AND (`phoneHash` IS NULL OR octet_length(`phoneHash`)=32) AND `status` IN ('ACTIVE','DELETION_PENDING') AND `genderSource` IN ('KAKAO','USER_CONFIRMED','UNKNOWN') AND `birthDateSource` IN ('KAKAO','USER_CONFIRMED','UNKNOWN') AND `version`>0 AND ((`phoneCipher` IS NULL)=(`phoneHash` IS NULL)) AND ((`genderCipher` IS NULL)=(`genderSource`='UNKNOWN')) AND ((`birthDateCipher` IS NULL)=(`birthDateSource`='UNKNOWN'))")
+@Check(name = "ckAppUserEntity", constraints = "(`phoneHash` IS NULL OR octet_length(`phoneHash`)=32) AND `status` IN ('ACTIVE','DELETION_PENDING') AND `genderSource` IN ('USER_CONFIRMED','UNKNOWN') AND `birthDateSource` IN ('USER_CONFIRMED','UNKNOWN') AND `version`>0 AND ((`phoneCipher` IS NULL)=(`phoneHash` IS NULL)) AND ((`genderCipher` IS NULL)=(`genderSource`='UNKNOWN')) AND ((`birthDateCipher` IS NULL)=(`birthDateSource`='UNKNOWN'))")
 @Entity
-@Table(name = "appUser", uniqueConstraints = @UniqueConstraint(name = "uqAppUser1", columnNames = "kakaoSubjectHash"))
+@Table(name = "appUser")
 public class AppUserEntity {
 	@Id
 	@Column(name = "id", nullable = false, columnDefinition = "BINARY(16)")
 	private UUID id;
-
-	@Column(name = "kakaoSubjectHash", nullable = false, columnDefinition = "VARBINARY(32)")
-	private byte[] kakaoSubjectHash;
-
-	@Column(name = "kakaoSubjectCipher", nullable = false, columnDefinition = "BLOB")
-	private byte[] kakaoSubjectCipher;
 
 	@Column(name = "keyRef", nullable = false, columnDefinition = "TEXT")
 	private String keyRef;

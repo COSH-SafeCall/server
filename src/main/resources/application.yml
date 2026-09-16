@@ -64,14 +64,6 @@ app:
     hmac-secret: ${HMAC_SECRET:}
     csrf-secret: ${CSRF_SECRET:}
     response-secret: ${RESPONSE_ENCRYPTION_SECRET:}
-  oauth:
-    kakao:
-      app-id: ${KAKAO_APP_ID:0}
-      client-id: ${KAKAO_CLIENT_ID:}
-      client-secret: ${KAKAO_CLIENT_SECRET:}
-      admin-key: ${KAKAO_ADMIN_KEY:}
-      redirect-uri: ${KAKAO_REDIRECT_URI:https://api.dev-safecall.r-e.kr/api/v1/auth/kakao/callback}
-      login-scopes: ${KAKAO_LOGIN_SCOPES:}
   auth:
     requests-per-minute: ${AUTH_REQUESTS_PER_MINUTE:10}
     cleanup-delay-ms: ${AUTH_CLEANUP_DELAY_MS:1000}

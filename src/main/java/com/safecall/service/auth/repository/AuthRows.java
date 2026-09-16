@@ -4,7 +4,7 @@ import java.util.UUID;
 public final class AuthRows {
 	private AuthRows() {}
 	public record Session(UUID id, byte[] sessionHash, byte[] csrfHash, UUID userId, String kind,
-		String status, Instant createdAt, Instant expiresAt, Instant sensitiveVerifiedAt) {
+		String status, Instant createdAt, Instant expiresAt) {
 		@Override public String toString() { return "Session[redacted]"; }
 	}
 	public record User(UUID id, String status, String keyRef, byte[] nameCipher, byte[] genderCipher,

@@ -16,15 +16,13 @@ import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import com.safecall.service.user.entity.AppUserEntity;
 
-@org.hibernate.annotations.Check(name = "ckDeletionJobEntity", constraints = "`scope` IN ('ACCOUNT','USAGE_HISTORY','AI_DATA','LOCATION_DATA') AND `status` IN ('PENDING','PROCESSING','LOCAL_DELETED','COMPLETED','FAILED') AND octet_length(`receiptHash`)=32 AND ((`status`='COMPLETED')=(`completedAt` IS NOT NULL)) AND (`accountSubjectHash` IS NULL OR octet_length(`accountSubjectHash`)=32) AND (`accountSubjectHash` IS NULL OR `scope`='ACCOUNT') AND (`scope`<>'ACCOUNT' OR `status` NOT IN ('PENDING','PROCESSING','LOCAL_DELETED') OR `accountSubjectHash` IS NOT NULL) AND (`status`<>'COMPLETED' OR `accountSubjectHash` IS NULL) AND ((`cleanupCipher` IS NULL)=(`cleanupKeyRef` IS NULL)) AND (`status`<>'COMPLETED' OR `cleanupCipher` IS NULL) AND `dueAt`>=`requestedAt` AND `receiptExpiresAt`>`requestedAt` AND (`completedAt` IS NULL OR `completedAt`>=`requestedAt`)")
+@org.hibernate.annotations.Check(name = "ckDeletionJobEntity", constraints = "`scope` IN ('ACCOUNT','USAGE_HISTORY') AND `status` IN ('PENDING','PROCESSING','COMPLETED','FAILED') AND octet_length(`receiptHash`)=32 AND ((`status`='COMPLETED')=(`completedAt` IS NOT NULL)) AND `dueAt`>=`requestedAt` AND `receiptExpiresAt`>`requestedAt` AND (`completedAt` IS NULL OR `completedAt`>=`requestedAt`)")
 @Entity
 @Table(name = "deletionJob", uniqueConstraints = {
 	@UniqueConstraint(name = "uqDeletionJob1", columnNames = "receiptHash"),
-	@UniqueConstraint(name = "uqDeletionJob2", columnNames = {"userId", "scope", "pendingMarker"}),
-	@UniqueConstraint(name = "uqDeletionPendingSubject", columnNames = {"accountSubjectHash", "pendingMarker"})
+	@UniqueConstraint(name = "uqDeletionJob2", columnNames = {"userId", "scope", "pendingMarker"})
 }, indexes = {
-	@Index(name = "ixDeletionDue", columnList = "status,dueAt"),
-	@Index(name = "ixDeletionExternalRetry", columnList = "scope,status,externalNextAttemptAt,requestedAt,id")
+	@Index(name = "ixDeletionDue", columnList = "status,dueAt")
 })
 public class DeletionJobEntity {
 	@Id
@@ -43,20 +41,11 @@ public class DeletionJobEntity {
 	@Column(name = "scope", nullable = false, length = 16)
 	private String scope;
 
-	@Column(name = "accountSubjectHash", columnDefinition = "VARBINARY(32)")
-	private byte[] accountSubjectHash;
-
 	@Column(name = "status", nullable = false, length = 13, columnDefinition = "VARCHAR(13) NOT NULL DEFAULT 'PENDING'")
 	private String status;
 
 	@Column(name = "receiptHash", nullable = false, columnDefinition = "VARBINARY(32)")
 	private byte[] receiptHash;
-
-	@Column(name = "cleanupCipher", columnDefinition = "BLOB")
-	private byte[] cleanupCipher;
-
-	@Column(name = "cleanupKeyRef", columnDefinition = "TEXT")
-	private String cleanupKeyRef;
 
 	@Column(name = "requestedAt", nullable = false, columnDefinition = "DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)")
 	private Instant requestedAt;
@@ -66,9 +55,6 @@ public class DeletionJobEntity {
 
 	@Column(name = "dueAt", nullable = false, columnDefinition = "DATETIME(6)")
 	private Instant dueAt;
-
-	@Column(name = "externalNextAttemptAt", columnDefinition = "DATETIME(6)")
-	private Instant externalNextAttemptAt;
 
 	@Column(name = "completedAt", columnDefinition = "DATETIME(6)")
 	private Instant completedAt;
@@ -80,7 +66,7 @@ public class DeletionJobEntity {
 	private Instant receiptExpiresAt;
 
 	@Column(name = "pendingMarker", insertable = false, updatable = false,
-		columnDefinition = "TINYINT GENERATED ALWAYS AS (CASE WHEN status IN ('PENDING','PROCESSING','LOCAL_DELETED') THEN 1 ELSE NULL END) STORED")
+		columnDefinition = "TINYINT GENERATED ALWAYS AS (CASE WHEN status IN ('PENDING','PROCESSING') THEN 1 ELSE NULL END) STORED")
 	private Byte pendingMarker;
 
 	protected DeletionJobEntity() {}

@@ -31,7 +31,7 @@ public class HistoryRepository {
 				c.`createdAt`,c.`answeredAt`,c.`endedAt`,c.`endReason`
 			FROM `callSession` c JOIN `webSession` s ON s.`id`=c.`sessionId`
 			JOIN `counterpart` p ON p.`code`=c.`counterpartCode`
-			WHERE s.`userId`=? AND s.`kind`='KAKAO' AND c.`state` IN ('ENDED','FAILED')
+			WHERE s.`userId`=? AND s.`kind`='MEMBER' AND c.`state` IN ('ENDED','FAILED')
 			"""+boundary+" ORDER BY c.`createdAt` DESC,c.`id` DESC LIMIT ?",
 			(r,n)->new UsageHistoryItem(uuid(r,"id"),r.getString("state"),r.getString("startMode"),r.getString("scenarioCode"),
 				r.getString("counterpartCode"),r.getString("displayName"),instant(r,"createdAt"),instant(r,"answeredAt"),instant(r,"endedAt"),r.getString("endReason")),args.toArray());
