@@ -40,8 +40,7 @@ public class CallService {
 	private Call owned(Session s,UUID id,String page){Call c=repository.call(id,false);if(c==null||!c.sessionId().equals(s.id())||!crypto.isEqual(c.pageKeyHash(),pageHash(page)))throw new CustomException(ErrorCode.RESOURCE_NOT_FOUND);return repository.call(id,true);}
 	private void eligible(Session s){
 		if(s.userId()!=null){
-			if(users.pending(s.userId(),"ACCOUNT")||users.pending(s.userId(),"AI_DATA"))throw new CustomException(ErrorCode.DATA_CLEANUP_PENDING);
-			if(!repository.hasConsent(s.userId(),"PRIVACY_PROCESSING")||!repository.hasConsent(s.userId(),"AI_CALL"))throw new CustomException(ErrorCode.CONSENT_REQUIRED);
+			if(users.pending(s.userId(),"ACCOUNT"))throw new CustomException(ErrorCode.DATA_CLEANUP_PENDING);
 			var user=auth.user(s.userId(),false);
 			if(user.confirmedAt()==null || user.nameCipher()==null || user.phoneCipher()==null)throw new CustomException(ErrorCode.PROFILE_REQUIRED);
 		}
@@ -159,7 +158,7 @@ public class CallService {
 	private boolean workerEligible(Session s,Call c){
 		if(!s.status().equals("ACTIVE")||!s.expiresAt().isAfter(now())){terminate(c,"ENDED","SESSION_EXPIRED",now());return false;}
 		User u=auth.user(s.userId(),false);if(s.userId()!=null&&(u==null||u.status().equals("DELETION_PENDING"))){terminate(c,"ENDED","DATA_DELETION",now());return false;}
-		try{eligible(s);return true;}catch(CustomException ex){terminate(c,"ENDED","CONSENT_WITHDRAWN",now());return false;}
+		try{eligible(s);return true;}catch(CustomException ex){terminate(c,"ENDED","DATA_DELETION",now());return false;}
 	}
 	public GeminiClient.IssueRequest claim(UUID id){
 		Call c=lockForWorker(id);if(c==null)return null;c=expire(c,now());if(c.isTerminal())return null;Session s=auth.session(c.sessionId());

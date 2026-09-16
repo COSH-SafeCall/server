@@ -9,15 +9,17 @@ import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
-import com.safecall.service.call.api.CallDtos.*;
 import com.safecall.service.auth.repository.AuthRows.Session;
+import com.safecall.service.call.api.CallDtos.*;
+import com.safecall.service.call.service.CallPolicy;
+import com.safecall.service.common.crypto.TransientKeys;
 
 @Repository
 public class CallRepository {
 	private final JdbcTemplate jdbc;
-	private final com.safecall.service.common.crypto.TransientKeys keys;
-	private final com.safecall.service.call.service.CallPolicy policy;
-	public CallRepository(JdbcTemplate jdbc,com.safecall.service.common.crypto.TransientKeys keys,com.safecall.service.call.service.CallPolicy policy) { this.jdbc=jdbc;this.keys=keys;this.policy=policy; }
+	private final TransientKeys keys;
+	private final CallPolicy policy;
+	public CallRepository(JdbcTemplate jdbc,TransientKeys keys,CallPolicy policy) { this.jdbc=jdbc;this.keys=keys;this.policy=policy; }
 	public record Call(UUID sessionId, UUID releaseId, Instant lastHeartbeatAt, byte[] pageKeyHash, CallView view) {
 		public boolean isTerminal() { return Set.of("ENDED","FAILED").contains(view.state()); }
 	}
@@ -131,13 +133,6 @@ public class CallRepository {
 			((g.`status`='READY' AND g.`newSessionExpiresAt`<=?)
 			OR (g.`status`='ISSUING' AND (g.`issuingStartedAt` IS NULL OR g.`issuingStartedAt`<=?))))) ORDER BY c.`createdAt` LIMIT 100
 			""",(r,n)->uuid(r,"id"),time(now),time(now),time(now),time(now.minusSeconds(policy.issueTimeoutSeconds())));
-	}
-	public boolean hasConsent(UUID user,String code) {
-		return Boolean.TRUE.equals(jdbc.queryForObject("""
-			SELECT EXISTS(SELECT 1 FROM `consentEvent` e WHERE
-			e.`id`=(SELECT e2.`id` FROM `consentEvent` e2 WHERE e2.`userId`=? AND e2.`documentCode`=?
-			ORDER BY e2.`recordedAt` DESC,e2.`id` DESC LIMIT 1) AND e.`action`='GRANTED' AND e.`documentVersion`=1)
-			""",Boolean.class,bin(user),code));
 	}
 	public int rate(byte[] scope,String kind,String operation,Instant window,int seconds,boolean increment) {
 		if(increment) jdbc.update("""

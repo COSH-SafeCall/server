@@ -3,6 +3,7 @@ package com.safecall.service.auth.repository;
 import java.nio.ByteBuffer;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -11,13 +12,14 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 import com.safecall.service.auth.api.AuthDtos.*;
 import com.safecall.service.auth.repository.AuthRows.*;
+import com.safecall.service.common.crypto.TransientKeys;
 
 @Repository
 public class AuthRepository {
 	private final JdbcTemplate jdbc;
-	private final java.time.Clock clock;
-	private final com.safecall.service.common.crypto.TransientKeys keys;
-	public AuthRepository(JdbcTemplate jdbc,java.time.Clock clock,com.safecall.service.common.crypto.TransientKeys keys) { this.jdbc = jdbc; this.clock=clock;this.keys=keys; }
+	private final Clock clock;
+	private final TransientKeys keys;
+	public AuthRepository(JdbcTemplate jdbc,Clock clock,TransientKeys keys) { this.jdbc = jdbc; this.clock=clock;this.keys=keys; }
 	public static byte[] bin(UUID id) {
 		return id == null ? null : ByteBuffer.allocate(16).putLong(id.getMostSignificantBits()).putLong(id.getLeastSignificantBits()).array();
 	}
@@ -39,31 +41,18 @@ public class AuthRepository {
 		return result.isEmpty() ? null : result.getFirst();
 	}
 	private static final RowMapper<Session> SESSION = (r,n) -> new Session(uuid(r,"id"), r.getBytes("sessionHash"),
-		r.getBytes("csrfHash"), uuid(r,"userId"), r.getString("kind"), r.getString("status"), instant(r,"createdAt"), instant(r,"expiresAt"), instant(r,"sensitiveVerifiedAt"));
+		r.getBytes("csrfHash"), uuid(r,"userId"), r.getString("kind"), r.getString("status"), instant(r,"createdAt"), instant(r,"expiresAt"));
 	private static final RowMapper<User> USER = (r,n) -> new User(uuid(r,"id"), r.getString("status"), r.getString("keyRef"),
 		r.getBytes("nameCipher"), r.getBytes("genderCipher"), r.getBytes("birthDateCipher"), r.getBytes("phoneCipher"),
 		r.getString("genderSource"), r.getString("birthDateSource"), instant(r,"profileConfirmedAt"), r.getLong("version"));
 
-	public User userBySubject(byte[] hash) {
-		return one("SELECT * FROM `appUser` WHERE `kakaoSubjectHash`=? FOR UPDATE", USER, hash);
-	}
 	public User user(UUID id, boolean isLock) {
 		return id == null ? null : one("SELECT * FROM `appUser` WHERE `id`=?" + (isLock ? " FOR UPDATE" : ""), USER, bin(id));
 	}
-	public boolean isDeletionPending(byte[] hash) {
-		return Boolean.TRUE.equals(jdbc.queryForObject("""
-			SELECT EXISTS(SELECT 1 FROM `deletionJob` WHERE `accountSubjectHash`=?
-			AND `scope`='ACCOUNT' AND `pendingMarker`=1)
-			""", Boolean.class, hash));
-	}
-	public void createUser(UUID id, byte[] subjectHash, byte[] subjectCipher, String keyRef,
-		byte[] name, byte[] gender, byte[] birthDate, byte[] phone, byte[] phoneHash, Instant now) {
+	public void createUser(UUID id, String keyRef, Instant now) {
 		jdbc.update("""
-			INSERT INTO `appUser` (`id`,`kakaoSubjectHash`,`kakaoSubjectCipher`,`keyRef`,
-			`nameCipher`,`genderCipher`,`birthDateCipher`,`phoneCipher`,`phoneHash`,
-			`genderSource`,`birthDateSource`,`createdAt`,`updatedAt`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-			""", bin(id), subjectHash, subjectCipher, keyRef, name, gender, birthDate, phone, phoneHash,
-			gender == null ? "UNKNOWN" : "KAKAO", birthDate == null ? "UNKNOWN" : "KAKAO", time(now), time(now));
+			INSERT INTO `appUser` (`id`,`keyRef`,`createdAt`,`updatedAt`) VALUES (?,?,?,?)
+			""", bin(id), keyRef, time(now), time(now));
 		jdbc.update("INSERT INTO `userSetting` (`userId`,`updatedAt`) VALUES (?,?)", bin(id), time(now));
 	}
 
@@ -74,9 +63,9 @@ public class AuthRepository {
 		user(snapshot.userId(),true);
 		return one("SELECT * FROM `webSession` WHERE `id`=? FOR UPDATE",SESSION,bin(id));
 	}
-	public void createSession(UUID id,UUID user,String kind,byte[] hash,byte[] csrf,Instant now,Instant expiry,Instant verified) {
-		jdbc.update("INSERT INTO `webSession` (`id`,`sessionHash`,`csrfHash`,`userId`,`kind`,`createdAt`,`expiresAt`,`sensitiveVerifiedAt`) VALUES (?,?,?,?,?,?,?,?)",
-			bin(id),hash,csrf,bin(user),kind,time(now),time(expiry),time(verified));
+	public void createSession(UUID id,UUID user,String kind,byte[] hash,byte[] csrf,Instant now,Instant expiry) {
+		jdbc.update("INSERT INTO `webSession` (`id`,`sessionHash`,`csrfHash`,`userId`,`kind`,`createdAt`,`expiresAt`) VALUES (?,?,?,?,?,?,?)",
+			bin(id),hash,csrf,bin(user),kind,time(now),time(expiry));
 	}
 	public void endSession(Session session, Instant now, String status, String reason, byte[] eventHash) {
 		jdbc.update("UPDATE `webSession` SET `status`=?,`revokedAt`=? WHERE `id`=?",
@@ -137,9 +126,6 @@ public class AuthRepository {
 		jdbc.update("UPDATE `apiIdempotency` SET `responseCipher`=NULL WHERE `responseExpiresAt`<=? AND `responseCipher` IS NOT NULL", time(now));
 		jdbc.update("DELETE FROM `apiIdempotency` WHERE `expiresAt`<=?", time(now));
 		jdbc.update("DELETE FROM `rateBucket` WHERE `expiresAt`<=?", time(now));
-		jdbc.update("UPDATE `oauthAttempt` SET `status`='EXPIRED',`completedAt`=? WHERE `status`='PENDING' AND `expiresAt`<=?",time(now),time(now));
-		jdbc.update("UPDATE `oauthAttempt` SET `status`='FAILED',`completedAt`=? WHERE `status`='EXCHANGING' AND `expiresAt`<=?",time(now),time(now));
-		jdbc.update("DELETE FROM `oauthAttempt` WHERE `status` IN ('SUCCEEDED','FAILED','EXPIRED') AND `expiresAt`<=?",time(now));
 	}
 	public List<UUID> expiredSessions(Instant now) {
 		return jdbc.query("SELECT `id` FROM `webSession` WHERE `status`='ACTIVE' AND `expiresAt`<=? ORDER BY `expiresAt` LIMIT 100",

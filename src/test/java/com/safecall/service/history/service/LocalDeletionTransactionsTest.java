@@ -18,8 +18,7 @@ class LocalDeletionTransactionsTest {
 			TransactionSynchronizationManager.clearSynchronization();throw new TransactionSystemException("synthetic uncertain commit");
 		}).when(manager).commit(any());
 		try {
-			new LocalDeletionTransactions(manager,auth,jdbc,keys,mock(com.safecall.service.common.crypto.SecretCrypto.class),
-				mock(com.safecall.service.common.crypto.TransientKeys.class)).execute(UUID.randomUUID(),UUID.randomUUID(),()->{});
+			new LocalDeletionTransactions(manager,auth,jdbc,keys).execute(UUID.randomUUID(),UUID.randomUUID(),()->{});
 			verifyNoInteractions(auth,jdbc,keys);verify(manager,never()).rollback(any());
 		} finally {if(TransactionSynchronizationManager.isSynchronizationActive())TransactionSynchronizationManager.clearSynchronization();}
 	}

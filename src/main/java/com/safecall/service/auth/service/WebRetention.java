@@ -30,8 +30,8 @@ public class WebRetention {
 		try {
 			var sessions=jdbc.queryForList("""
 				SELECT `id` FROM `webSession` WHERE
-				(`kind`<>'KAKAO' AND COALESCE(`revokedAt`,`expiresAt`)<=?) OR
-				(`kind`='KAKAO' AND COALESCE(`revokedAt`,`expiresAt`)<=?) LIMIT 100
+				(`kind`<>'MEMBER' AND COALESCE(`revokedAt`,`expiresAt`)<=?) OR
+				(`kind`='MEMBER' AND COALESCE(`revokedAt`,`expiresAt`)<=?) LIMIT 100
 				""",byte[].class,time(clock.instant().minusSeconds(3600)),time(clock.instant().minusSeconds(2592000)));
 			for(byte[] id:sessions)transaction.executeWithoutResult(tx -> deleteSession(uuid(id)));
 			var calls=jdbc.queryForList("SELECT `id`,`sessionId` FROM `callSession` WHERE `endedAt`<=? LIMIT 100",time(clock.instant().minusSeconds(2592000)));
@@ -51,7 +51,7 @@ public class WebRetention {
 		var session=auth.lockSession(id);if(session==null)return;
 		var now=clock.instant();
 		boolean due=Boolean.TRUE.equals(jdbc.queryForObject("""
-			SELECT IF(`kind`='KAKAO',COALESCE(`revokedAt`,`expiresAt`)<=?,COALESCE(`revokedAt`,`expiresAt`)<=?) FROM `webSession` WHERE `id`=?
+			SELECT IF(`kind`='MEMBER',COALESCE(`revokedAt`,`expiresAt`)<=?,COALESCE(`revokedAt`,`expiresAt`)<=?) FROM `webSession` WHERE `id`=?
 			""",Boolean.class,time(now.minusSeconds(2592000)),time(now.minusSeconds(3600)),bin(id)));
 		if(!due)return;
 		if(session.status().equals("ACTIVE"))auth.endSession(session,now,"EXPIRED","SESSION_EXPIRED",crypto.hash("SERVER_EVENT","SESSION_EXPIRED"));
