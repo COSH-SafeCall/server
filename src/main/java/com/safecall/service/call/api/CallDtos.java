@@ -10,7 +10,7 @@ public final class CallDtos {
 	public enum StartMode { STANDARD, QUICK }
 	public enum EventType { CONNECTED, RINGING_SHOWN, ANSWERED, FAILED }
 	public enum Failure { CONNECTION_FAILED, RINGING_FAILED, MICROPHONE_FAILED, AUDIO_FAILED, CONNECTION_LOST }
-	public enum EndReason { USER_ENDED, DECLINED, BACK_NAVIGATION, TAB_HIDDEN, PAGE_EXIT, PAGE_RELOAD, SWITCH_TO_FALLBACK }
+	public enum EndReason { USER_ENDED, DECLINED, BACK_NAVIGATION, TAB_HIDDEN, PAGE_EXIT, PAGE_RELOAD, SWITCH_TO_FALLBACK, DURATION_LIMIT }
 	public record CreateCall(@NotNull UUID clientCallId,@NotNull StartMode startMode,@NotBlank @Size(max=24) String scenarioCode,
 		@NotBlank @Size(max=6) String counterpartCode,@NotNull Permission microphonePermission) {}
 	public record CallEvent(@NotNull UUID eventId,@NotNull EventType type,UUID grantId,@NotNull @JsonDeserialize(using=DatabaseInstantDeserializer.class) Instant occurredAt,

@@ -75,7 +75,7 @@ public class HistoryService {
 			users.deletion(session.userId(),new DeletionReceipt(id,target,"PENDING",token,now.plusSeconds(86400),expiry),crypto.hash("DELETION_RECEIPT",token),now);
 			if (input.scope()==DeletionScope.ACCOUNT) for(UUID sessionId:users.sessions(session.userId())) {
 				var locked=auth.lockSession(sessionId);
-				if (locked!=null) auth.endCalls(locked,now,"DATA_DELETION",crypto.hash("SERVER_EVENT","DATA_DELETION"));
+				if (locked!=null && locked.status().equals("ACTIVE")) auth.endSession(locked,now,"REVOKED","DATA_DELETION",crypto.hash("SERVER_EVENT","DATA_DELETION"));
 			}
 		} else repository.receipt(id,crypto.hash("DELETION_RECEIPT",token),expiry);
 		var job=repository.job(id);var receipt=new DeletionReceipt(id,target,job.view().status(),token,job.view().dueAt(),expiry);

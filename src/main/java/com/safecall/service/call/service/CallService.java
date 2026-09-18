@@ -107,9 +107,11 @@ public class CallService {
 		Instant lease=min(now.plusSeconds(policy.leaseSeconds()),min(c.view().expiresAt(),s.expiresAt()));repository.heartbeat(id,now,lease);return new HeartbeatView(c.view().state(),lease,c.view().expiresAt());
 	}
 	public CallView end(String cookie,String page,UUID id,EndCall body,UUID key){
-		Session s=authentication.authenticated(cookie);Call c=owned(s,id,page);byte[] hash=hash(body);
-		if(replay(s,id,"CALL_END",key,hash)!=null)return expire(c,now()).view();
-		c=expire(c,now());if(!c.isTerminal()){repository.end(id,"ENDED",body.reason().name(),now());repository.event(id,UUID.randomUUID(),hash,"ENDED","ENDED",body.occurredAt(),now());}
+		Session s=authentication.authenticated(cookie);Call c=owned(s,id,page);byte[] hash=hash(body);Instant now=now();
+		if(replay(s,id,"CALL_END",key,hash)!=null)return expire(c,now).view();
+		c=expire(c,now);
+		if(body.reason()==EndReason.DURATION_LIMIT && c.view().expiresAt().minusSeconds(20).isAfter(now))throw new CustomException(ErrorCode.INVALID_REQUEST);
+		if(!c.isTerminal()){repository.end(id,"ENDED",body.reason().name(),now);repository.event(id,UUID.randomUUID(),hash,"ENDED","ENDED",body.occurredAt(),now);}
 		remember(s,id,"CALL_END",key,hash,id);return repository.call(id,false).view();
 	}
 	private void active(Call c){if(c.isTerminal())throw new SessionInvalidException(ErrorCode.CALL_TERMINAL);}

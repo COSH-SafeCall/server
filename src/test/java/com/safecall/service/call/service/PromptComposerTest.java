@@ -11,7 +11,10 @@ import com.safecall.service.common.crypto.*;
 
 class PromptComposerTest {
 	private Prompt prompt(String counterpart) {
-		return new Prompt(UUID.randomUUID(),"models/synthetic","v1beta","안전 지침","확인된 {age}세 {gender}의 일상 말투.","중립적인 대화.","가족의 일상 대화.","Puck","FOLLOWED",counterpart);
+		return prompt("FOLLOWED",counterpart);
+	}
+	private Prompt prompt(String scenario,String counterpart) {
+		return new Prompt(UUID.randomUUID(),"models/synthetic","v1beta","안전 지침","확인된 {age}세 {gender}의 일상 말투.","중립적인 대화.","가족의 일상 대화.","Puck",scenario,counterpart);
 	}
 	@Test void guestDoesNotInferGenderOrAge() {
 		var result=PromptComposer.compose(prompt("FATHER"),null,null,Instant.parse("2026-09-09T15:00:00Z"));
@@ -40,5 +43,15 @@ class PromptComposerTest {
 			: "2000-01-01".getBytes(java.nio.charset.StandardCharsets.UTF_8));
 		var result=new PromptComposer(keys,crypto).compose(prompt("FATHER"),user,Instant.now());
 		assertThat(result.isDemographicApplied()).isTrue(); assertThat(result.isGenderAddressApplied()).isTrue(); verify(crypto,times(2)).open(any(),anyString(),any());
+	}
+	@Test void taxiScenarioUsesNaturalEtaQuestionsWithoutPickupPromises() {
+		var result=PromptComposer.compose(prompt("UNSAFE_TAXI","FATHER"),null,null,Instant.now());
+		assertThat(result.instruction()).contains("얼마 정도 걸릴 것 같아?","차 많이 막혀?","택시 기사나 위험 여부를 직접 언급하지 않는다")
+			.doesNotContain("데리러 갈게","큰길로 나와");
+	}
+	@Test void demoClosingSignalProducesOneRoleSpecificFinalTurn() {
+		var result=PromptComposer.compose(prompt("FOLLOWED","FRIEND"),null,null,Instant.now());
+		assertThat(result.instruction()).contains(PromptComposer.DEMO_CLOSING_SIGNAL,"나 이제 가봐야 돼. 조심히 들어가.",
+			"새로운 질문을 하지 말고","어떤 말도 더 하지 않는다");
 	}
 }
