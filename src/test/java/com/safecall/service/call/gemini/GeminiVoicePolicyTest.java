@@ -7,12 +7,12 @@ import org.junit.jupiter.api.Test;
 class GeminiVoicePolicyTest {
 	private final GeminiVoicePolicy policy = new GeminiVoicePolicy();
 
-	@Test void fatherUsesFirmMaleVoice() {
-		assertThat(policy.select("FATHER", "Puck")).isEqualTo("Alnilam");
+	@Test void fatherUsesSmoothMaleVoice() {
+		assertThat(policy.select("FATHER", "Puck")).isEqualTo("Algieba");
 	}
 
-	@Test void friendUsesCasualMaleVoice() {
-		assertThat(policy.select("FRIEND", "Puck")).isEqualTo("Zubenelgenubi");
+	@Test void friendUsesInformativeMaleVoice() {
+		assertThat(policy.select("FRIEND", "Puck")).isEqualTo("Rasalgethi");
 	}
 
 	@Test void motherKeepsReviewedReleaseVoice() {
