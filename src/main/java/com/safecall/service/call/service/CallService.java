@@ -22,11 +22,11 @@ import com.safecall.service.user.repository.UserRepository;
 public class CallService {
 	private final AuthTransactions authentication;private final AuthRepository auth;private final UserRepository users;private final CallRepository repository;
 	private final SecretCrypto crypto;private final TransientKeys keys;private final JsonMapper mapper;private final Clock clock;
-	private final GeminiClient gemini;private final GeminiSettings settings;private final PromptComposer composer;private final CallPolicy policy;
+	private final GeminiClient gemini;private final GeminiSettings settings;private final GeminiVoicePolicy voices;private final PromptComposer composer;private final CallPolicy policy;
 	public CallService(AuthTransactions authentication,AuthRepository auth,UserRepository users,CallRepository repository,SecretCrypto crypto,TransientKeys keys,JsonMapper mapper,
-		Clock clock,GeminiClient gemini,GeminiSettings settings,PromptComposer composer,CallPolicy policy){
+		Clock clock,GeminiClient gemini,GeminiSettings settings,GeminiVoicePolicy voices,PromptComposer composer,CallPolicy policy){
 		this.authentication=authentication;this.auth=auth;this.users=users;this.repository=repository;this.crypto=crypto;this.keys=keys;
-		this.mapper=mapper;this.clock=clock;this.gemini=gemini;this.settings=settings;this.composer=composer;this.policy=policy;
+		this.mapper=mapper;this.clock=clock;this.gemini=gemini;this.settings=settings;this.voices=voices;this.composer=composer;this.policy=policy;
 	}
 	private Instant now(){return clock.instant().truncatedTo(ChronoUnit.MICROS);}
 	private byte[] hash(Object body){return crypto.hash("CALL_REQUEST",mapper.writeValueAsString(body));}
@@ -80,7 +80,7 @@ public class CallService {
 		if(!g.status().equals("READY"))throw new CustomException(ErrorCode.CALL_TERMINAL);
 		Prompt p=prompt(call.releaseId(),call.view().scenarioCode(),call.view().counterpartCode(),now());
 		String token=new String(crypto.open(keys.read(g.keyRef()),"GEMINI_GRANT:"+g.id(),g.tokenCipher()),StandardCharsets.UTF_8);
-		return new ConnectionView(g.id(),"READY",token,p.model(),p.apiVersion(),p.voice(),List.of("AUDIO"),g.newSessionExpiresAt(),g.expiresAt(),1);
+		return new ConnectionView(g.id(),"READY",token,p.model(),p.apiVersion(),voices.select(p.counterpart(),p.voice()),List.of("AUDIO"),g.newSessionExpiresAt(),g.expiresAt(),1);
 	}
 	public CallView event(String cookie,String page,UUID id,CallEvent body,UUID key){
 		Session s=authentication.authenticated(cookie);Call call=owned(s,id,page);byte[] hash=hash(body);Instant now=now();
@@ -170,7 +170,7 @@ public class CallService {
 			var composed=composer.compose(p,auth.user(s.userId(),false),now());String instruction=composed.instruction();
 			repository.flags(id,composed.isDemographicApplied(),composed.isGenderAddressApplied());
 			if(!repository.claim(g.id(),now()))return null;
-			return new GeminiClient.IssueRequest(p.model(),p.apiVersion(),p.voice(),instruction,min(now().plusSeconds(settings.newSessionSeconds()),c.view().expiresAt()),c.view().expiresAt(),g.id());
+			return new GeminiClient.IssueRequest(p.model(),p.apiVersion(),voices.select(p.counterpart(),p.voice()),instruction,min(now().plusSeconds(settings.newSessionSeconds()),c.view().expiresAt()),c.view().expiresAt(),g.id());
 		}catch(CustomException ex){terminate(c,"FAILED","CONNECTION_FAILED",now());return null;}
 	}
 	public void finish(UUID id,GeminiClient.IssueRequest request,String token,Boolean unknown){
