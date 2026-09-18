@@ -42,7 +42,12 @@ springdoc:
 
 server:
   port: ${SERVER_PORT:8081}
-  forward-headers-strategy: none
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      remote-ip-header: x-forwarded-for
+      protocol-header: x-forwarded-proto
+      internal-proxies: '172\.28\.0\.\d{1,3}'
   error:
     include-message: never
     include-stacktrace: never
@@ -88,3 +93,7 @@ app:
     lease-seconds: ${CALL_LEASE_SECONDS:30}
     issue-timeout-seconds: ${CALL_ISSUE_TIMEOUT_SECONDS:10}
     worker-delay-ms: ${CALL_WORKER_DELAY_MS:1000}
+    minute-limit: ${APP_CALL_MINUTE_LIMIT:5}
+    guest-daily-limit: ${APP_CALL_GUEST_DAILY_LIMIT:20}
+    member-daily-limit: ${APP_CALL_MEMBER_DAILY_LIMIT:100}
+    max-active: ${APP_CALL_MAX_ACTIVE:15}

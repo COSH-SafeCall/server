@@ -58,6 +58,7 @@ public enum ErrorCode {
 	SETTINGS_SAVE_FAILED(503, "설정을 저장하지 못했습니다. 다시 시도해 주세요."),
 	UNSUPPORTED_MEDIA_TYPE(415, "JSON 형식으로 요청해 주세요."),
 	RATE_LIMITED(429, "요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."),
+	CALL_CAPACITY_REACHED(429, "현재 체험 인원이 많습니다. 잠시 후 다시 시도해 주세요."),
 	INTERNAL_SERVER_ERROR(500, "요청을 처리하지 못했습니다."),
 	KAKAO_UNAVAILABLE(503, "카카오 인증을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."),
 	LOGOUT_FAILED(503, "로그아웃을 완료하지 못했습니다. 다시 시도해 주세요.");

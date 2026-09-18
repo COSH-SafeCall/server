@@ -4,6 +4,7 @@ SafeCall 웹 MVP API 1~7장. 현재 실행·구조·검증에 필요한 문서�
 
 | 목적 | 문서 |
 |---|---|
+| API 요청·응답·전체 오류 계약 | [API 명세서](API_명세서.md) |
 | 처음 실행 | [환경 설정](setup.md) → [JPA 데이터베이스 설정](database.md) |
 | 코드 이해 | [서비스 구조·핵심 정책·API 목록](architecture.md) |
 | 프론트 동의 연동 | [정적 동의·안내 계약](frontend-static-content.md) |
