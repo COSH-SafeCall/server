@@ -90,6 +90,71 @@ class WebIntegrationTest {
 		registry.add("app.crypto.discard-delay-ms", () -> 3600000);
 	}
 
+@Test void failingDiscardBatchDoesNotStarveLaterJobs(){
+		var tx=new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+		doThrow(new IllegalStateException("synthetic permanent failure")).when(userKeys).discard(startsWith("blocked-"));
+		clock.advance(-1);
+		tx.executeWithoutResult(s->{for(int i=0;i<100;i++)discardQueue.enqueue("blocked-"+i);});
+		clock.advance(1);String ref=userKeys.create(UUID.randomUUID());
+		tx.executeWithoutResult(s->discardQueue.enqueue(ref));
+		discardQueue.run();assertThat(count("keyDiscardJob")).isEqualTo(101);
+		// Failed jobs are delayed; the next due batch must reach the later healthy key.
+		discardQueue.run();assertThat(count("keyDiscardJob")).isEqualTo(100);
+		assertThat(java.nio.file.Files.exists(java.nio.file.Path.of(System.getenv("AUTH_TEST_KEY_DIRECTORY"),ref))).isFalse();
+	}
+	@Test void historyDeletionKeepsHomeAndComposerEligibleThroughCompletion()throws Exception{
+		Browser b=composerMember();status(deletion(b,"USAGE_HISTORY",UUID.randomUUID()),202);
+		assertThat(send("GET","/api/v1/home",null,b,null).body().path("isMessageComposeEligible").asBoolean()).isTrue();status(composer(b,"?mode=SAFETY"),200);
+		clock.advance(60);historyCleanup.run();
+		assertThat(send("GET","/api/v1/home",null,b,null).body().path("isMessageComposeEligible").asBoolean()).isTrue();status(composer(b,"?mode=SAFETY"),200);
+	}
+	@Test void homeAndComposerAgreeForEveryDeletionScopeAndStatus()throws Exception{
+		Browser b=composerMember();var job=deletion(b,"USAGE_HISTORY",UUID.randomUUID());status(job,202);
+		for(String scope:List.of("ACCOUNT","AI_DATA","LOCATION_DATA","USAGE_HISTORY")){
+			for(String state:List.of("PENDING","PROCESSING","FAILED","COMPLETED")){
+				jdbc.update("UPDATE deletionJob SET scope=?,status=?,accountSubjectHash=?,completedAt=? WHERE id=?",scope,state,
+					scope.equals("ACCOUNT")&&!state.equals("COMPLETED")?crypto.hash("TEST_SUBJECT","synthetic"):null,
+					state.equals("COMPLETED")?time(clock.instant()):null,bin(UUID.fromString(job.text("id"))));
+				boolean eligible=scope.equals("USAGE_HISTORY")||Set.of("FAILED","COMPLETED").contains(state);
+				var home=send("GET","/api/v1/home",null,b,null);status(home,200);
+				assertThat(home.body().path("isMessageComposeEligible").asBoolean()).as(scope+" "+state).isEqualTo(eligible);
+				status(composer(b,"?mode=SAFETY"),eligible?200:409);
+			}
+		}
+	}
+	@Test void callEventAndEndRejectInvalidTimesWithoutChangingState()throws Exception{
+		Browser b=guest();UUID id=create(b);
+		for(Object invalid:List.of(0,"2026-09-12T00:00:00","2026-02-30T00:00:00Z","+10000-01-01T00:00:00Z","0999-12-31T23:59:59Z","1000-01-01T00:00:00+01:00","9999-12-31T23:59:59-01:00")){
+			var event=new HashMap<>(eventBody(b,id,"FAILED",null));event.put("errorCode","CONNECTION_FAILED");event.put("occurredAt",invalid);
+			status(send("POST","/api/v1/calls/"+id+"/events",event,b,UUID.randomUUID()),400);
+			status(send("POST","/api/v1/calls/"+id+"/end",Map.of("reason","USER_ENDED","occurredAt",invalid),b,UUID.randomUUID()),400);
+	@Test
+	void browserPermissionsAreStoredPerMember() throws Exception {
+		Browser first = member();
+		Browser second = member();
+		Result saved = send("POST", "/api/v1/me/permissions", Map.of("permissions", List.of(
+			Map.of("code", "MICROPHONE", "status", "GRANTED"),
+			Map.of("code", "LOCATION", "status", "DENIED"))), first, UUID.randomUUID());
+		status(saved, 200);
+		Result untouched = send("GET", "/api/v1/me/permissions", null, second, null);
+		status(untouched, 200);
+		assertThat(saved.body().path("items").get(0).path("status").asText()).isEqualTo("GRANTED");
+		assertThat(saved.body().path("items").get(1).path("status").asText()).isEqualTo("DENIED");
+		assertThat(untouched.body().path("items").get(0).path("status").asText()).isEqualTo("NOT_DETERMINED");
+		assertThat(untouched.body().path("items").get(1).path("status").asText()).isEqualTo("NOT_DETERMINED");
+	}
+
+	@Test
+	void fixedProfileAndGuardianValuesMayRepeatAcrossMembers() throws Exception {
+		for (Browser browser : List.of(member(), member())) {
+			Result profile = send("GET", "/api/v1/me/profile", null, browser, null);
+			status(profile, 200);
+			status(send("PATCH", "/api/v1/me/profile", Map.of(
+				"name", "홍길동", "gender", "FEMALE", "birthDate", "2000-01-01",
+				"phone", "010-0000-0000", "isConfirmed", true,
+				"expectedVersion", profile.body().path("version").asLong()), browser, UUID.randomUUID()), 200);
+			status(send("POST", "/api/v1/me/emergency-contacts", Map.of(
+				"name", "보호자", "relationship", "가족", "phone", "010-1111-1111"), browser, UUID.randomUUID()), 201);
 	@TestConfiguration
 	static class Configuration {
 		@Bean @Primary MutableClock testClock() { return new MutableClock(); }

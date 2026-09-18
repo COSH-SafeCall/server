@@ -143,4 +143,9 @@ public class CallRepository {
 			(r,n)->r.getInt(1),kind,scope,operation,time(window),seconds);
 		return count==null ? 0 : count;
 	}
+	public int lockAndCountActive() {
+		jdbc.update("INSERT INTO `callCapacityLock` (`id`) VALUES (1) ON DUPLICATE KEY UPDATE `id`=`id`");
+		jdbc.queryForObject("SELECT `id` FROM `callCapacityLock` WHERE `id`=1 FOR UPDATE",Integer.class);
+		return jdbc.queryForObject("SELECT COUNT(*) FROM `callSession` WHERE `activeMarker`=1",Integer.class);
+	}
 }

@@ -61,6 +61,7 @@ public class CallService {
 		Prompt prompt=prompt(null,body.scenarioCode(),body.counterpartCode(),now);
 		if(!policy.isValidated(prompt.model()))throw new CustomException(ErrorCode.GEMINI_VALIDATION_REQUIRED);
 		var composed=composer.compose(prompt,auth.user(s.userId(),false),now);limits(s,now,remoteAddress);
+		if(repository.lockAndCountActive()>=policy.maxActive())throw new CustomException(ErrorCode.CALL_CAPACITY_REACHED,10);
 		Instant expiry=min(now.plusSeconds(Math.min(settings.connectionSeconds(),policy.modelMaxSeconds())),s.expiresAt());
 		UUID id=UUID.randomUUID();repository.insert(id,s,body,prompt.releaseId(),composed.isDemographicApplied(),composed.isGenderAddressApplied(),now,expiry,pageHash);
 		repository.event(id,UUID.randomUUID(),hash,"CREATED","CREATED",now,now);repository.preparing(id);repository.event(id,UUID.randomUUID(),hash,"PREPARING","PREPARING",now,now);

@@ -1,6 +1,6 @@
 # Swagger 테스트 시작
 
-[문서 목록](../README.md) · 먼저 [환경 설정](../setup.md)과 [DB 설치](../database.md)를 마친다.
+[문서 목록](../README.md) · [API 요청·응답·오류 명세](../API_명세서.md) · 먼저 [환경 설정](../setup.md)과 [DB 설치](../database.md)를 마친다.
 
 ## 1. Swagger와 세션 준비
 
