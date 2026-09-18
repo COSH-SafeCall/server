@@ -8,7 +8,7 @@ class GeminiVoicePolicyTest {
 	private final GeminiVoicePolicy policy = new GeminiVoicePolicy();
 
 	@Test void fatherUsesFirmMaleVoice() {
-		assertThat(policy.select("FATHER", "Puck")).isEqualTo("Orus");
+		assertThat(policy.select("FATHER", "Puck")).isEqualTo("Alnilam");
 	}
 
 	@Test void friendUsesCasualMaleVoice() {

@@ -4,7 +4,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class GeminiVoicePolicy {
-	static final String FATHER_VOICE = "Orus";
+	static final String FATHER_VOICE = "Alnilam";
 	static final String FRIEND_VOICE = "Zubenelgenubi";
 
 	public String select(String counterpartCode, String reviewedVoiceId) {
