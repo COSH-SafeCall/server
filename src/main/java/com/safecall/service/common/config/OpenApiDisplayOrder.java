@@ -9,9 +9,9 @@ final class OpenApiDisplayOrder {
 
 	private record Group(String name, String description, List<String> operations) {}
 	private static final List<Group> GROUPS = List.of(
-		new Group("01. 인증·세션", "A05로 시작하고 게스트 진입·로그인 후 다시 A05를 조회합니다. 로그아웃은 테스트 마지막에 실행합니다.", List.of("A05", "A01", "A02", "A02_CALLBACK", "A04")),
-		new Group("03. 사용자 정보", "로그인 후 U05로 동의를 저장한 뒤, 현재 version으로 프로필을 확인·수정합니다.", List.of("U01", "U02")),
-		new Group("04. 동의", "동의 문구는 프론트엔드 정적 콘텐츠이며 서버는 고정 버전 1의 선택과 철회 이력을 관리합니다.", List.of("U04", "U05", "U06")),
+		new Group("01. 인증·세션", "A05로 시작하고 게스트 또는 가상 회원으로 진입한 뒤 다시 A05를 조회합니다. 로그아웃은 테스트 마지막에 실행합니다.", List.of("A05", "A01", "A02", "A04")),
+		new Group("03. 사용자 정보", "가상 로그인 후 현재 version으로 프로필을 확인·수정합니다.", List.of("U01", "U02")),
+		new Group("04. 권한", "브라우저에서 확인한 마이크·위치 권한 상태를 사용자별로 저장하고 조회합니다.", List.of("U04", "U05")),
 		new Group("05. 비상 연락망", "조회 → 등록 → 수정 → 삭제. 메시지 테스트에는 보호자 1명 이상이 필요합니다.", List.of("U07", "U08", "U09", "U10")),
 		new Group("06. 사용자 설정", "조회 후 현재 version으로 알림 방식을 수정합니다.", List.of("U11", "U12")),
 		new Group("07. 홈·통화 선택지", "현재 기능 자격과 통화 선택지를 확인합니다.", List.of("H01", "H02")),

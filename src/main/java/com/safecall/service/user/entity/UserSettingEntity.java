@@ -14,7 +14,7 @@ import jakarta.persistence.Version;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 
-@org.hibernate.annotations.Check(name = "ckUserSettingEntity", constraints = "`incomingAlertMode` IN ('RINGTONE','SILENT') AND `version`>0")
+@org.hibernate.annotations.Check(name = "ckUserSettingEntity", constraints = "`incomingAlertMode` IN ('RINGTONE','SILENT') AND `microphonePermission` IN ('GRANTED','DENIED','NOT_DETERMINED') AND `locationPermission` IN ('GRANTED','DENIED','NOT_DETERMINED') AND `version`>0")
 @Entity
 @Table(name = "userSetting")
 public class UserSettingEntity {
@@ -30,6 +30,12 @@ public class UserSettingEntity {
 
 	@Column(name = "incomingAlertMode", nullable = false, length = 8, columnDefinition = "VARCHAR(8) NOT NULL DEFAULT 'RINGTONE'")
 	private String incomingAlertMode;
+
+	@Column(name = "microphonePermission", nullable = false, length = 16, columnDefinition = "VARCHAR(16) NOT NULL DEFAULT 'NOT_DETERMINED'")
+	private String microphonePermission;
+
+	@Column(name = "locationPermission", nullable = false, length = 16, columnDefinition = "VARCHAR(16) NOT NULL DEFAULT 'NOT_DETERMINED'")
+	private String locationPermission;
 
 	@Column(name = "updatedAt", nullable = false, columnDefinition = "DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)")
 	private Instant updatedAt;

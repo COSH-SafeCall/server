@@ -3,6 +3,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.safecall.service.auth.api.AuthDtos.Permission;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 
@@ -10,7 +11,7 @@ public final class UserDtos {
 	private UserDtos() {}
 	public enum Gender { MALE, FEMALE }
 	public enum AlertMode { RINGTONE, SILENT }
-	public enum DecisionAction { GRANTED, DECLINED }
+	public enum PermissionCode { MICROPHONE, LOCATION }
 	public record ProfileRequest(@JsonProperty(required=true) @Size(max=200) String name, @JsonProperty(required=true) Gender gender,
 		@JsonProperty(required=true) @Size(max=10) String birthDate,
 		@JsonProperty(required=true) @Size(max=32) String phone, @NotNull @AssertTrue Boolean isConfirmed, @NotNull @Positive Long expectedVersion) {
@@ -33,23 +34,15 @@ public final class UserDtos {
 	}
 	public record SettingRequest(@NotNull AlertMode incomingAlertMode, @NotNull @Positive Long expectedVersion) {}
 	public record SettingView(AlertMode incomingAlertMode, long version) {}
-	public record Decision(@NotBlank @Size(max=24) String code,
-		@NotNull @Positive @io.swagger.v3.oas.annotations.media.Schema(allowableValues="1",example="1") Integer version,
-		@NotNull DecisionAction action) {}
-	public record DecisionsRequest(@NotNull @Size(min=1,max=3) List<@NotNull @Valid Decision> decisions) {}
-	public record ConsentView(String code,
-		@io.swagger.v3.oas.annotations.media.Schema(allowableValues="1",example="1") int currentVersion,
-		Integer decisionVersion, String action, boolean isEffective, Instant recordedAt) {}
-	public record WithdrawRequest() {}
+	public record PermissionDecision(@NotNull PermissionCode code, @NotNull Permission status) {}
+	public record PermissionsRequest(@NotNull @Size(min=1,max=2) List<@NotNull @Valid PermissionDecision> permissions) {}
+	public record PermissionView(PermissionCode code, Permission status, Instant updatedAt) {}
 	public record DeleteContactRequest(@NotNull @Positive Long expectedVersion) {}
 	public record DeletionView(UUID id,
-		@io.swagger.v3.oas.annotations.media.Schema(allowableValues={"ACCOUNT","USAGE_HISTORY","AI_DATA","LOCATION_DATA"}) String scope,
-		@io.swagger.v3.oas.annotations.media.Schema(allowableValues={"PENDING","PROCESSING","LOCAL_DELETED","COMPLETED","FAILED"}) String status,
+		@io.swagger.v3.oas.annotations.media.Schema(allowableValues={"ACCOUNT","USAGE_HISTORY"}) String scope,
+		@io.swagger.v3.oas.annotations.media.Schema(allowableValues={"PENDING","PROCESSING","COMPLETED","FAILED"}) String status,
 		Instant requestedAt,Instant dueAt,Instant completedAt,String errorCode) {}
 	public record DeletionReceipt(UUID id, String scope, String status, String receiptToken, Instant dueAt, Instant receiptExpiresAt) {
 		@Override public String toString() { return "DeletionReceipt[redacted]"; }
-	}
-	public record WithdrawalView(String code, String action, DeletionReceipt deletion) {
-		@Override public String toString() { return "WithdrawalView[redacted]"; }
 	}
 }

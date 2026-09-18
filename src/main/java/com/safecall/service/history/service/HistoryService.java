@@ -14,7 +14,7 @@ import com.safecall.service.history.api.HistoryDtos.*;
 import com.safecall.service.history.repository.HistoryRepository;
 import com.safecall.service.user.api.UserDtos.*;
 import com.safecall.service.user.repository.UserRepository;
-import com.safecall.service.user.service.UserTransactions.WithdrawalResult;
+import com.safecall.service.user.service.UserTransactions.DeletionResult;
 
 @Service
 @Transactional(isolation=Isolation.READ_COMMITTED,noRollbackFor=SessionInvalidException.class)
@@ -39,7 +39,7 @@ public class HistoryService {
 		String next=more?cursors.encode(session.userId(),new HistoryCursor.Position(items.getLast().createdAt(),items.getLast().id())):null;
 		return new UsageHistoryView(items,next);
 	}
-	public WithdrawalResult request(String cookie,DeletionRequest input,UUID key,boolean isKakaoInApp) {
+	public DeletionResult request(String cookie,DeletionRequest input,UUID key) {
 		var session=authentication.member(cookie,true);var now=clock.instant().truncatedTo(ChronoUnit.MICROS);
 		byte[] scope=crypto.idempotency("USER",session.userId(),"COLLECTION","data-deletions");
 		byte[] hash=crypto.hash("REQUEST",mapper.writeValueAsString(input));
@@ -53,12 +53,9 @@ public class HistoryService {
 			var job=repository.job(saved.id());
 			if (job==null || !crypto.isEqual(job.receiptHash(),crypto.hash("DELETION_RECEIPT",saved.receiptToken())))
 				throw new CustomException(ErrorCode.DELETION_RECEIPT_EXPIRED);
-			return new WithdrawalResult(job.view(),saved.receiptToken(),saved.receiptExpiresAt());
+			return new DeletionResult(job.view(),saved.receiptToken(),saved.receiptExpiresAt());
 		}
-		if (input.scope()==DeletionScope.ACCOUNT) {
-			if (isKakaoInApp) throw new CustomException(ErrorCode.REAUTHENTICATION_REQUIRED);
-			authentication.requireSensitive(session);
-		} else {
+		if (input.scope()!=DeletionScope.ACCOUNT) {
 			if (users.pending(session.userId(),"ACCOUNT")) throw new CustomException(ErrorCode.ACCOUNT_DELETION_PENDING);
 			if (repository.hasOpenCall(session.userId())) throw new CustomException(ErrorCode.CALL_ALREADY_OPEN);
 		}
@@ -85,7 +82,7 @@ public class HistoryService {
 		UUID replayId=UUID.randomUUID();
 		auth.saveReplay(replayId,session,scope,"DATA_DELETION",key,hash,id,
 			crypto.sealResponse(replayId.toString(),mapper.writeValueAsBytes(receipt)),now.plusSeconds(60),now);
-		return new WithdrawalResult(job.view(),token,expiry);
+		return new DeletionResult(job.view(),token,expiry);
 	}
 	public DeletionView status(String cookie,String receipt,UUID id) {
 		// 잘못된 세션이 있어도 유효한 접수증은 독립적으로 사용할 수 있다.
@@ -95,7 +92,7 @@ public class HistoryService {
 			&& crypto.isEqual(job.receiptHash(),crypto.hash("DELETION_RECEIPT",receipt))) return job.view();
 		if (cookie!=null && cookie.matches("[A-Za-z0-9_-]{43}")) {
 			var session=auth.byCookie(crypto.hash("WEB_SESSION",cookie));
-			if (session!=null && session.kind().equals("KAKAO") && session.status().equals("ACTIVE")
+			if (session!=null && session.kind().equals("MEMBER") && session.status().equals("ACTIVE")
 				&& session.expiresAt().isAfter(clock.instant()) && session.userId()!=null && session.userId().equals(job.userId()))
 				return job.view();
 		}

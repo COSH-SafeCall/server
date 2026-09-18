@@ -12,6 +12,7 @@ import time
 def main():
 	parser = argparse.ArgumentParser(description=__doc__)
 	parser.add_argument('--mysql-bin', default='C:/Program Files/MySQL/MySQL Server 8.0/bin')
+	parser.add_argument('--integration-only', action='store_true', help='이미 통과한 단위 테스트를 생략하고 MySQL 통합 테스트만 실행합니다.')
 	args = parser.parse_args()
 	server = Path(__file__).resolve().parents[1]
 	build = (server / 'build').resolve()
@@ -58,7 +59,8 @@ def main():
 		env['AUTH_TEST_DB_URL'] = f'jdbc:mysql://127.0.0.1:{port}/{database}?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true'
 		env['AUTH_TEST_KEY_DIRECTORY'] = str(work / 'keys')
 		gradle = [str(server / 'gradlew.bat')] if os.name == 'nt' else [str(server / 'gradlew')]
-		result = subprocess.run([*gradle, 'test', 'integrationTest', '--no-daemon', '--rerun-tasks'], cwd=server, env=env)
+		tasks = ['integrationTest'] if args.integration_only else ['test', 'integrationTest']
+		result = subprocess.run([*gradle, *tasks, '--no-daemon', '--rerun-tasks'], cwd=server, env=env)
 		return result.returncode
 	finally:
 		if process is not None and process.poll() is None:

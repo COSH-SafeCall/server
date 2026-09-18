@@ -10,7 +10,6 @@ import io.swagger.v3.oas.annotations.*;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.media.Schema;
 import com.safecall.service.auth.api.WebCookies;
-import com.safecall.service.auth.service.OAuthService;
 import com.safecall.service.common.error.*;
 import com.safecall.service.history.api.HistoryDtos.*;
 import com.safecall.service.history.service.HistoryService;
@@ -42,10 +41,10 @@ public class HistoryController {
 	}
 	@PostMapping(value="/me/data-deletions",consumes="application/json")
 	@Operation(operationId="R02",summary="R02 · 계정 또는 이용 기록 삭제 접수",
-		description="삭제 범위와 복구 불가능 항목을 안내한 뒤 isConfirmed=true로 접수합니다. ACCOUNT는 동일 계정의 최근 5분 이내 명시적 재인증이 필요합니다. 접수증은 HttpOnly 쿠키로만 발급합니다.")
+		description="삭제 범위와 복구 불가능 항목을 안내한 뒤 isConfirmed=true로 접수합니다. 접수증은 HttpOnly 쿠키로만 발급합니다.")
 	public ResponseEntity<DeletionView> delete(HttpServletRequest request,@Valid @RequestBody DeletionRequest body,
 		@RequestHeader("Idempotency-Key") UUID key) {
-		var result=service.request(WebCookies.read(request),body,key,OAuthService.isKakaoInApp(request.getHeader("User-Agent")));
+		var result=service.request(WebCookies.read(request),body,key);
 		return ResponseEntity.accepted().header("Set-Cookie",WebCookies.cookie("__Host-safecall-deletion",result.receiptToken(),
 			Math.max(0,Duration.between(clock.instant(),result.receiptExpiresAt()).getSeconds()))).body(result.view());
 	}

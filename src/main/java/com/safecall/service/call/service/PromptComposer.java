@@ -19,8 +19,8 @@ public class PromptComposer {
 		String gender=null; LocalDate birth=null;
 		if(user!=null) {
 			byte[] key=keys.read(user.keyRef());
-			if("KAKAO".equals(user.genderSource())) gender=open(key,user,"gender",user.genderCipher());
-			if("KAKAO".equals(user.birthDateSource())) {
+			if(!"UNKNOWN".equals(user.genderSource())) gender=open(key,user,"gender",user.genderCipher());
+			if(!"UNKNOWN".equals(user.birthDateSource())) {
 				String value=open(key,user,"birthDate",user.birthDateCipher());
 				if(value!=null) birth=LocalDate.parse(value);
 			}
