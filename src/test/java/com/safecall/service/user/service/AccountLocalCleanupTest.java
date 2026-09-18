@@ -25,10 +25,11 @@ class AccountLocalCleanupTest {
 		mock(TransientKeys.class),Clock.systemUTC(),deletions);
 
 	@Test void onlyExplicitDeletionJobsAreScheduledWithoutScanningIncompleteAccounts() {
-		when(jdbc.queryForList(contains("FROM `deletionJob`"),any(Object.class)))
+		when(jdbc.queryForList(contains("FROM `deletionJob`")))
 			.thenReturn(List.of(Map.<String,Object>of("id",bin(job),"userId",bin(owner))));
 		cleanup.run();
 		verify(deletions).execute(eq(job),eq(owner),any(Runnable.class));
+		verify(jdbc).queryForList("SELECT `id`,`userId` FROM `deletionJob` WHERE `scope`='ACCOUNT' AND `status`='PENDING' ORDER BY `requestedAt` LIMIT 100");
 		verify(jdbc,never()).queryForList(contains("FROM `appUser`"),eq(byte[].class),any(Object.class));
 	}
 }

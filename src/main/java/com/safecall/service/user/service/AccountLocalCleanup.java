@@ -39,8 +39,7 @@ public class AccountLocalCleanup {
 	@Scheduled(scheduler = "cleanupScheduler", fixedDelayString = "${app.auth.cleanup-delay-ms}", initialDelayString = "${app.auth.cleanup-delay-ms}")
 	public void run() {
 		try {
-			var jobs = jdbc.queryForList("SELECT `id`,`userId` FROM `deletionJob` WHERE `scope`='ACCOUNT' AND `status`='PENDING' AND `requestedAt`<=? LIMIT 100",
-				time(clock.instant().minusSeconds(60)));
+			var jobs = jdbc.queryForList("SELECT `id`,`userId` FROM `deletionJob` WHERE `scope`='ACCOUNT' AND `status`='PENDING' ORDER BY `requestedAt` LIMIT 100");
 			for (var job : jobs) {
 				if (job.get("userId") != null) {
 					deletionTransactions.execute(uuid((byte[]) job.get("id")), uuid((byte[]) job.get("userId")),
@@ -60,10 +59,6 @@ public class AccountLocalCleanup {
 		}
 		var jobs = jdbc.queryForList("SELECT `status` FROM `deletionJob` WHERE `id`=? FOR UPDATE", jobId);
 		if (jobs.isEmpty() || !"PENDING".equals(jobs.getFirst().get("status"))) {
-			return;
-		}
-		if (Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM `apiIdempotency` WHERE `resourceId`=? AND `responseExpiresAt`>?)",
-			Boolean.class, jobId, time(clock.instant())))) {
 			return;
 		}
 		removeRate(crypto.hash("CALL_RATE", userId.toString()));
