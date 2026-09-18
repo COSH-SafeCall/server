@@ -347,7 +347,7 @@ C03 완료 응답:
   "token":"민감한 단기 연결 토큰",
   "model":"models/example",
   "apiVersion":"v1beta",
-  "voiceId":"Alnilam",
+  "voiceId":"Algieba",
   "responseModalities":["AUDIO"],
   "newSessionExpiresAt":"2026-09-18T12:35:56.123456Z",
   "expiresAt":"2026-09-18T12:44:56.123456Z",
@@ -355,7 +355,7 @@ C03 완료 응답:
 }
 ```
 
-- `voiceId`: 세션 초기 setup에 고정하는 Gemini 기본 음성 ID. `FATHER` 통화는 `Alnilam`, `FRIEND` 통화는 `Zubenelgenubi`를 사용하고 `MOTHER`는 검수된 프롬프트 릴리스의 `voiceId`를 사용한다.
+- `voiceId`: 세션 초기 setup에 고정하는 Gemini 기본 음성 ID. `FATHER` 통화는 `Algieba`, `FRIEND` 통화는 `Rasalgethi`를 사용하고 `MOTHER`는 검수된 프롬프트 릴리스의 `voiceId`를 사용한다.
 
 C04 요청:
 
