@@ -34,7 +34,7 @@ public class MessageController {
 		@ApiResponse(responseCode="200", description="작성 자료 조회 성공", useReturnTypeSchema=true),
 		@ApiResponse(responseCode="400", description="INVALID_REQUEST", content=@Content(schema=@Schema(implementation=ErrorResponse.class))),
 		@ApiResponse(responseCode="401", description="SESSION_EXPIRED", content=@Content(schema=@Schema(implementation=ErrorResponse.class))),
-		@ApiResponse(responseCode="403", description="LOGIN_REQUIRED / CONSENT_REQUIRED / ORIGIN_NOT_ALLOWED", content=@Content(schema=@Schema(implementation=ErrorResponse.class))),
+		@ApiResponse(responseCode="403", description="LOGIN_REQUIRED / ORIGIN_NOT_ALLOWED", content=@Content(schema=@Schema(implementation=ErrorResponse.class))),
 		@ApiResponse(responseCode="409", description="PROFILE_REQUIRED / CONTACT_REQUIRED / CALL_ALREADY_OPEN / DATA_CLEANUP_PENDING", content=@Content(schema=@Schema(implementation=ErrorResponse.class)))
 	})
 	public ResponseEntity<MessageComposerView> compose(HttpServletRequest request) {

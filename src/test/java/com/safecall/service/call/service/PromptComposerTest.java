@@ -31,11 +31,14 @@ class PromptComposerTest {
 		var result=PromptComposer.compose(prompt("FRIEND"),"FEMALE",LocalDate.of(2000,1,1),Instant.now());
 		assertThat(result.isGenderAddressApplied()).isFalse(); assertThat(result.instruction()).contains("너로 부른다").doesNotContain("딸로");
 	}
-	@Test void userConfirmedValuesAreNeverDecryptedForGemini() {
+	@Test void userConfirmedDemographicsAreUsedWithoutConsentGate() {
 		UserKeyStore keys=mock(UserKeyStore.class); SecretCrypto crypto=mock(SecretCrypto.class);
 		var user=new User(UUID.randomUUID(),"ACTIVE","synthetic-key",new byte[]{1},new byte[]{2},new byte[]{3},new byte[]{4},"USER_CONFIRMED","USER_CONFIRMED",Instant.now(),1);
 		when(keys.read(anyString())).thenReturn(new byte[32]);
+		when(crypto.open(any(),anyString(),any())).thenAnswer(invocation -> invocation.<String>getArgument(1).endsWith(":gender")
+			? "FEMALE".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+			: "2000-01-01".getBytes(java.nio.charset.StandardCharsets.UTF_8));
 		var result=new PromptComposer(keys,crypto).compose(prompt("FATHER"),user,Instant.now());
-		assertThat(result.isDemographicApplied()).isFalse(); assertThat(result.isGenderAddressApplied()).isFalse(); verifyNoInteractions(crypto);
+		assertThat(result.isDemographicApplied()).isTrue(); assertThat(result.isGenderAddressApplied()).isTrue(); verify(crypto,times(2)).open(any(),anyString(),any());
 	}
 }

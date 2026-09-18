@@ -25,12 +25,8 @@ public class RequestFilter extends OncePerRequestFilter {
 		response.setHeader("Content-Security-Policy","default-src 'self'; script-src 'self' 'nonce-"+nonce+"'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; connect-src 'self' https://generativelanguage.googleapis.com wss://generativelanguage.googleapis.com");
 		try {
 			String path=request.getRequestURI(),origin=request.getHeader("Origin");
-			if(path.equals("/api/v1/me/consents/PRIVACY_PROCESSING/withdrawal") && OAuthService.isKakaoInApp(request.getHeader("User-Agent")))throw new CustomException(ErrorCode.REAUTHENTICATION_REQUIRED);
 			if(!path.startsWith("/api/")){chain.doFilter(request,response);return;}
-			boolean callback=path.equals("/api/v1/auth/kakao/callback")&&request.getMethod().equals("GET");
-			if(callback) {
-				for(String name:List.of("state","code","error"))if(request.getParameterValues(name)!=null && request.getParameterValues(name).length!=1)throw new CustomException(ErrorCode.INVALID_REQUEST);
-			} else if(origin!=null) {
+			if(origin!=null) {
 				if(!origin.equals(policy.origin()) || Collections.list(request.getHeaders("Origin")).size()!=1)throw new CustomException(ErrorCode.ORIGIN_NOT_ALLOWED);
 				response.setHeader("Access-Control-Allow-Origin",policy.origin());response.setHeader("Access-Control-Allow-Credentials","true");response.addHeader("Vary","Origin");
 			}
@@ -52,7 +48,7 @@ public class RequestFilter extends OncePerRequestFilter {
 				}
 			}
 			validateUuidHeader(request,"Idempotency-Key");
-			if(request.getMethod().equals("POST")&&Set.of("/api/v1/auth/guest","/api/v1/auth/kakao/authorization").contains(path))maintenance.checkRate(request.getRemoteAddr());
+			if(request.getMethod().equals("POST")&&Set.of("/api/v1/auth/guest","/api/v1/auth/virtual").contains(path))maintenance.checkRate(request.getRemoteAddr());
 			chain.doFilter(request,response);
 		} catch(CustomException ex){if(!response.isCommitted())writer.write(request,response,ex);}
 		catch(Exception ex){if(!response.isCommitted())writer.write(request,response,new CustomException(ErrorCode.INTERNAL_SERVER_ERROR));}

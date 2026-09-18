@@ -4,9 +4,6 @@ public enum ErrorCode {
 	ORIGIN_NOT_ALLOWED(403,"허용되지 않은 요청 출처입니다."),
 	CSRF_INVALID(403,"요청 출처 또는 CSRF 토큰을 확인해 주세요."),
 	ALREADY_AUTHENTICATED(409,"이미 로그인되어 있습니다."),
-	REAUTHENTICATION_REQUIRED(403,"민감 작업을 위해 다시 인증해 주세요."),
-	REAUTH_ACCOUNT_MISMATCH(403,"같은 카카오 계정으로 인증해 주세요."),
-	INVALID_CONSENT(422,"동의 코드와 고정 버전 1을 확인해 주세요."),
 	PROFILE_REQUIRED(422,"이름과 전화번호를 확인해 주세요."),
 	MESSAGE_PROFILE_REQUIRED(409,"이름과 전화번호를 확인해 주세요."),
 	CONTACT_REQUIRED(409,"비상 연락망을 등록해 주세요."),
@@ -33,10 +30,8 @@ public enum ErrorCode {
 	AUTHENTICATION_REQUIRED(401, "인증이 필요합니다."),
 	SESSION_EXPIRED(401, "세션이 만료되었습니다. 다시 로그인해 주세요."),
 	TOKEN_REUSED(401, "이미 사용된 인증 정보가 감지되어 세션이 종료되었습니다."),
-	KAKAO_TOKEN_INVALID(401, "카카오 인증 정보가 유효하지 않습니다."),
-	LOGIN_REQUIRED(403, "카카오 로그인이 필요합니다."),
+	LOGIN_REQUIRED(403, "가상 로그인이 필요합니다."),
 	ACCESS_DENIED(403, "접근할 수 없습니다."),
-	CONSENT_REQUIRED(403, "필수 이용 동의가 필요합니다."),
 	RESOURCE_NOT_FOUND(404, "대상을 찾을 수 없습니다."),
 	METHOD_NOT_ALLOWED(405, "지원하지 않는 요청 방식입니다."),
 	NOT_ACCEPTABLE(406, "JSON 응답을 요청해 주세요."),
@@ -52,7 +47,6 @@ public enum ErrorCode {
 	CONTACT_NOT_FOUND(404, "보호자 정보를 찾을 수 없습니다."),
 	CONTACT_LIMIT_REACHED(409, "보호자는 최대 2명까지 등록할 수 있습니다."),
 	CONTACT_PHONE_DUPLICATE(409, "본인 또는 다른 보호자와 같은 번호는 등록할 수 없습니다."),
-	WITHDRAWAL_REQUIRED(409, "동의 철회 기능으로 관련 데이터 정리를 요청해 주세요."),
 	DATA_CLEANUP_PENDING(409, "관련 데이터 정리를 처리 중입니다."),
 	DELETION_RECEIPT_EXPIRED(409, "삭제 접수증 재조회 시간이 만료되었습니다."),
 	SETTINGS_SAVE_FAILED(503, "설정을 저장하지 못했습니다. 다시 시도해 주세요."),
@@ -60,7 +54,6 @@ public enum ErrorCode {
 	RATE_LIMITED(429, "요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."),
 	CALL_CAPACITY_REACHED(429, "현재 체험 인원이 많습니다. 잠시 후 다시 시도해 주세요."),
 	INTERNAL_SERVER_ERROR(500, "요청을 처리하지 못했습니다."),
-	KAKAO_UNAVAILABLE(503, "카카오 인증을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."),
 	LOGOUT_FAILED(503, "로그아웃을 완료하지 못했습니다. 다시 시도해 주세요.");
 
 	private final int status;

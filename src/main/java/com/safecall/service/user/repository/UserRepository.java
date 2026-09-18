@@ -9,18 +9,15 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import com.safecall.service.auth.api.AuthDtos.Permission;
 import com.safecall.service.user.api.UserDtos.*;
 
 @Repository
 public class UserRepository {
 	private final JdbcTemplate jdbc;
-	private final com.safecall.service.common.crypto.SecretCrypto crypto;
-	private final com.safecall.service.common.crypto.TransientKeys keys;
-	public UserRepository(JdbcTemplate jdbc,com.safecall.service.common.crypto.SecretCrypto crypto,com.safecall.service.common.crypto.TransientKeys keys) {
-		this.jdbc=jdbc;this.crypto=crypto;this.keys=keys;
-	}
+	public UserRepository(JdbcTemplate jdbc) { this.jdbc=jdbc; }
 	public record Contact(UUID id, int slot, byte[] name, byte[] relationship, byte[] phone, byte[] phoneHash, long version) {}
-	public record Event(String action, int version, Instant recordedAt) {}
+	public record PermissionState(Permission microphone,Permission location,Instant updatedAt) {}
 	private static UUID id(ResultSet r, String name) throws SQLException {
 		var b = ByteBuffer.wrap(r.getBytes(name)); return new UUID(b.getLong(), b.getLong());
 	}
@@ -66,20 +63,15 @@ public class UserRepository {
 		jdbc.update("UPDATE `userSetting` SET `incomingAlertMode`=?,`updatedAt`=?,`version`=`version`+1 WHERE `userId`=? AND `version`=?",
 			mode.name(), time(now), bin(user),expectedVersion);
 	}
-	public Event latest(UUID user, String code) {
-		var rows = jdbc.query("""
-			SELECT * FROM `consentEvent` WHERE `userId`=? AND `documentCode`=? ORDER BY `recordedAt` DESC,`id` DESC LIMIT 1
-			""", (r,n) -> new Event(r.getString("action"),r.getInt("documentVersion"),instant(r,"recordedAt")),bin(user),code);
-		return rows.isEmpty() ? null : rows.getFirst();
+	public PermissionState permissions(UUID user) {
+		return jdbc.queryForObject("SELECT `microphonePermission`,`locationPermission`,`updatedAt` FROM `userSetting` WHERE `userId`=?",
+			(r,n) -> new PermissionState(Permission.valueOf(r.getString("microphonePermission")),Permission.valueOf(r.getString("locationPermission")),instant(r,"updatedAt")),bin(user));
 	}
-	public void decision(UUID user, String code, int version, String action, Instant now) {
-		Event latest = latest(user, code);
-		Instant timestamp = latest != null && !now.isAfter(latest.recordedAt()) ? latest.recordedAt().plusNanos(1000) : now;
-		jdbc.update("INSERT INTO `consentEvent` (`id`,`userId`,`documentCode`,`documentVersion`,`action`,`recordedAt`) VALUES (?,?,?,?,?,?)",
-			bin(UUID.randomUUID()),bin(user),code,version,action,time(timestamp));
-	}
-	public boolean wasWithdrawn(UUID user, String code) {
-		return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM `consentEvent` WHERE `userId`=? AND `documentCode`=? AND `action`='WITHDRAWN')",Boolean.class,bin(user),code));
+	public void updatePermissions(UUID user,Permission microphone,Permission location,Instant now) {
+		jdbc.update("""
+			UPDATE `userSetting` SET `microphonePermission`=COALESCE(?,`microphonePermission`),
+			`locationPermission`=COALESCE(?,`locationPermission`),`updatedAt`=?,`version`=`version`+1 WHERE `userId`=?
+			""",microphone==null?null:microphone.name(),location==null?null:location.name(),time(now),bin(user));
 	}
 	public boolean pending(UUID user, String scope) {
 		return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM `deletionJob` WHERE `userId`=? AND `scope`=? AND `pendingMarker`=1)",Boolean.class,bin(user),scope));
@@ -92,15 +84,10 @@ public class UserRepository {
 	}
 	public void deletion(UUID user, DeletionReceipt receipt, byte[] receiptHash, Instant now) {
 		jdbc.update("""
-			INSERT INTO `deletionJob` (`id`,`userId`,`scope`,`accountSubjectHash`,`receiptHash`,`requestedAt`,`cutoffAt`,`dueAt`,`receiptExpiresAt`)
-			SELECT ?,?, ?,CASE WHEN ?='ACCOUNT' THEN `kakaoSubjectHash` ELSE NULL END,?,?,?,?,? FROM `appUser` WHERE `id`=?
-			""",bin(receipt.id()),bin(user),receipt.scope(),receipt.scope(),receiptHash,time(now),time(now),time(receipt.dueAt()),time(receipt.receiptExpiresAt()),bin(user));
+			INSERT INTO `deletionJob` (`id`,`userId`,`scope`,`receiptHash`,`requestedAt`,`cutoffAt`,`dueAt`,`receiptExpiresAt`)
+			VALUES (?,?,?,?,?,?,?,?)
+			""",bin(receipt.id()),bin(user),receipt.scope(),receiptHash,time(now),time(now),time(receipt.dueAt()),time(receipt.receiptExpiresAt()));
 		if (receipt.scope().equals("ACCOUNT")) {
-			// 완료 세션이 보존 정리된 회원도 정확한 접수 전 상태로 복구할 수 있도록 최소 상태만 암호화한다.
-			String previous=jdbc.queryForObject("SELECT `status` FROM `appUser` WHERE `id`=?",String.class,bin(user));
-			String ref=keys.create(UUID.randomUUID());
-			byte[] cipher=crypto.seal(keys.read(ref),"DELETION_ROLLBACK:"+receipt.id(),previous.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-			jdbc.update("UPDATE `deletionJob` SET `cleanupCipher`=?,`cleanupKeyRef`=? WHERE `id`=?",cipher,ref,bin(receipt.id()));
 			jdbc.update("UPDATE `appUser` SET `status`='DELETION_PENDING',`version`=`version`+1,`updatedAt`=? WHERE `id`=?",time(now),bin(user));
 		}
 	}

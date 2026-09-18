@@ -39,7 +39,6 @@ public class MessageService {
 		if (rows.isEmpty()) throw new CustomException(ErrorCode.SESSION_EXPIRED);
 		var material = rows.getFirst();
 		if (material.isCleanupPending()) throw new CustomException(ErrorCode.DATA_CLEANUP_PENDING);
-		if (!material.isPrivacyGranted()) throw new CustomException(ErrorCode.CONSENT_REQUIRED);
 		if (!material.isConfirmed() || material.name()==null || material.phone()==null)
 			throw new CustomException(ErrorCode.MESSAGE_PROFILE_REQUIRED);
 		if (material.isCallOpen()) throw new CustomException(ErrorCode.CALL_ALREADY_OPEN);

@@ -11,7 +11,6 @@ import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.*;
 import org.springframework.transaction.support.SimpleTransactionStatus;
-import tools.jackson.databind.json.JsonMapper;
 import com.safecall.service.auth.repository.AuthRepository;
 import com.safecall.service.common.crypto.*;
 import com.safecall.service.history.service.LocalDeletionTransactions;
@@ -23,7 +22,7 @@ class AccountLocalCleanupTest {
 	private final LocalDeletionTransactions deletions=mock(LocalDeletionTransactions.class);
 	private final UUID job=UUID.randomUUID(),owner=UUID.randomUUID();
 	private final AccountLocalCleanup cleanup=new AccountLocalCleanup(jdbc,auth,mock(UserRepository.class),mock(SecretCrypto.class),
-		mock(UserKeyStore.class),mock(TransientKeys.class),JsonMapper.builder().build(),Clock.systemUTC(),deletions);
+		mock(TransientKeys.class),Clock.systemUTC(),deletions);
 
 	@Test void onlyExplicitDeletionJobsAreScheduledWithoutScanningIncompleteAccounts() {
 		when(jdbc.queryForList(contains("FROM `deletionJob`"),any(Object.class)))
