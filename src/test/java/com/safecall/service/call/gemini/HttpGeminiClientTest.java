@@ -16,7 +16,7 @@ class HttpGeminiClientTest {
 	private final MockRestServiceServer server=MockRestServiceServer.bindTo(builder).build();
 	private final HttpGeminiClient client=new HttpGeminiClient(builder.build(),JsonMapper.builder().build(),"synthetic-key",URL);
 	private GeminiClient.IssueRequest request() {
-		return new GeminiClient.IssueRequest("models/gemini-3.1-flash-live-preview","v1beta","Puck","synthetic system policy",
+		return new GeminiClient.IssueRequest("models/gemini-3.1-flash-live-preview","v1beta","Orus","synthetic system policy",
 			Instant.parse("2026-09-10T00:01:00Z"),Instant.parse("2026-09-10T00:09:00Z"));
 	}
 	@Test void grantLocksModelVoiceAndInstructionsWithoutResumption() {
@@ -25,7 +25,7 @@ class HttpGeminiClientTest {
 			.andExpect(jsonPath("$.newSessionExpireTime").value("2026-09-10T00:01:00Z"))
 			.andExpect(jsonPath("$.bidiGenerateContentSetup.model").value(request().model()))
 			.andExpect(jsonPath("$.bidiGenerateContentSetup.systemInstruction.parts[0].text").value("synthetic system policy"))
-			.andExpect(jsonPath("$.bidiGenerateContentSetup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName").value("Puck"))
+			.andExpect(jsonPath("$.bidiGenerateContentSetup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName").value("Orus"))
 			.andExpect(jsonPath("$.bidiGenerateContentSetup.generationConfig.responseModalities[0]").value("AUDIO"))
 			.andExpect(jsonPath("$.bidiGenerateContentSetup.tools").doesNotExist())
 			.andExpect(jsonPath("$.bidiGenerateContentSetup.sessionResumption").doesNotExist())

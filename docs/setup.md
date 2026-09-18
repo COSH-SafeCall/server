@@ -59,7 +59,7 @@ origin을 바꾸면 redirect URI도 함께 설정한다. 서버 포트만 바꾸
 | CALL_ISSUE_TIMEOUT_SECONDS | ISSUING 결과 불명 판정 기한(초) / `10`, 1 이상이며 lease 미만. 발급 선점 시각 `issuingStartedAt` 기준 |
 | CALL_WORKER_DELAY_MS | 통화 작업자 실행 주기(ms) / `1000` |
 
-모델/API/voice는 발행된 promptRelease/personaPrompt에서 읽는다. 환경변수만 입력하거나 DRAFT 초안을 넣는 것으로 통화가 준비되지는 않는다. [프롬프트 발행](#프롬프트-발행)을 참고한다.
+모델/API/voice는 발행된 promptRelease/personaPrompt에서 읽는다. 단, 세션 setup에서 일관된 남성 음성을 보장하기 위해 `FATHER`는 `Orus`, `FRIEND`는 `Zubenelgenubi`로 고정하고 `MOTHER`는 발행된 `voiceId`를 사용한다. 환경변수만 입력하거나 DRAFT 초안을 넣는 것으로 통화가 준비되지는 않는다. [프롬프트 발행](#프롬프트-발행)을 참고한다.
 
 예를 들어 connection TTL을 30초로 줄이면 new-session TTL도 30초 이하로 맞춰야 한다. 기본 60초를 그대로 두면 시작 시 설정 검증에 실패한다. 통화의 최종 만료는 서버 상한·검수된 모델 상한·웹 세션 잔여 시간의 최솟값이다.
 

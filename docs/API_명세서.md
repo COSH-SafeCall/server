@@ -347,13 +347,15 @@ C03 완료 응답:
   "token":"민감한 단기 연결 토큰",
   "model":"models/example",
   "apiVersion":"v1beta",
-  "voiceId":"Puck",
+  "voiceId":"Orus",
   "responseModalities":["AUDIO"],
   "newSessionExpiresAt":"2026-09-18T12:35:56.123456Z",
   "expiresAt":"2026-09-18T12:44:56.123456Z",
   "uses":1
 }
 ```
+
+- `voiceId`: 세션 초기 setup에 고정하는 Gemini 기본 음성 ID. `FATHER` 통화는 `Orus`, `FRIEND` 통화는 `Zubenelgenubi`를 사용하고 `MOTHER`는 검수된 프롬프트 릴리스의 `voiceId`를 사용한다.
 
 C04 요청:
 
