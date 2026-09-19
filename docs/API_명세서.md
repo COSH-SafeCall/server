@@ -267,15 +267,35 @@ U12 요청과 응답:
   "identity": {"name":"홍길동","maskedPhone":"010-xxxx-5678"},
   "baseBody": "홍길동(010-xxxx-5678)의 SafeCall 안심 메시지입니다.",
   "templateVersion": 3,
-  "isLocationPermissionGranted": false,
-  "mapTemplate": null,
+  "isLocationPermissionGranted": true,
+  "mapTemplate": {
+    "version": 1,
+    "urlTemplate": "https://map.naver.com/v5/search/{latitude},{longitude}",
+    "coordinateSystem": "WGS84",
+    "maxAgeSeconds": 30,
+    "maxAccuracyMeters": 100
+  },
   "notice": "이 화면에서는 실제 문자가 발송되지 않습니다.",
   "preparedAt": "2026-09-18T12:34:56.123456Z",
   "expiresAt": "2026-09-18T12:39:56.123456Z"
 }
 ```
 
-지도 템플릿이 검수·설정된 경우 `mapTemplate`은 `{version,urlTemplate,coordinateSystem,maxAgeSeconds,maxAccuracyMeters}`다. M01은 좌표를 받거나 SMS를 발송하지 않는다.
+| 필드 | 형식 | 서버 기준 의미 |
+|---|---|---|
+| `baseBody` | string | 서버가 사용자 이름과 마스킹 전화번호를 적용해 완성한 기본 메시지 본문. `TEST` 모드에서는 앞에 `[테스트] `가 붙는다. |
+| `templateVersion` | integer | 기본 메시지 본문의 서버 템플릿 버전. 현재 값은 `3`이다. |
+| `isLocationPermissionGranted` | boolean | 서버에 저장된 위치 권한 상태가 `GRANTED`인지 나타낸다. 현재 브라우저의 실제 권한과 위치 취득 성공까지 보장하지는 않는다. |
+| `mapTemplate` | object 또는 null | 검수된 지도 URL 템플릿 설정. 지도 설정 환경변수 6개가 모두 생략된 경우 `null`이다. |
+| `mapTemplate.version` | integer | 검수된 지도 템플릿 버전. 양의 정수다. |
+| `mapTemplate.urlTemplate` | string | HTTPS 지도 URL 템플릿. `{latitude}`와 `{longitude}`가 각각 정확히 한 번 포함된다. |
+| `mapTemplate.coordinateSystem` | string | 서버가 반환하는 좌표계. 현재 `WGS84`로 고정된다. |
+| `mapTemplate.maxAgeSeconds` | integer | 사용할 수 있는 위치 정보의 최대 경과 시간. 현재 `30`초다. |
+| `mapTemplate.maxAccuracyMeters` | integer | 사용할 수 있는 위치 정확도의 최대 오차. 현재 `100`미터다. |
+
+프론트엔드는 M01 응답의 `baseBody`를 기본 메시지로 표시한다. `isLocationPermissionGranted=true`이고 `mapTemplate`이 null이 아니며, 브라우저에서 얻은 WGS84 위치가 `maxAgeSeconds`와 `maxAccuracyMeters` 기준을 만족할 때만 `urlTemplate`의 `{latitude}`와 `{longitude}`를 실제 좌표로 각각 치환해 위치 링크를 구성한다. 예를 들어 위 예시에서 위도 `37.45`, 경도 `126.70`을 적용하면 `https://map.naver.com/v5/search/37.45,126.70`이 된다.
+
+완성 메시지는 `baseBody`와 생성한 위치 링크를 화면에서 조합한다. M01은 위도·경도, 치환이 끝난 URL 또는 최종 메시지를 요청으로 받거나 저장하지 않으며 SMS도 발송하지 않는다. 지도 설정이 없거나 권한·위치 품질 기준을 충족하지 못하면 `baseBody`만 표시한다.
 
 ### 2.5 AI 통화
 
