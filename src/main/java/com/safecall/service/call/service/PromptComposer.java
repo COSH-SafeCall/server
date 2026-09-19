@@ -37,13 +37,15 @@ public class PromptComposer {
 		// These server invariants apply to every release, including future reviewed content.
 		text.append("앞선 내용과 충돌하면 다음 서버 규칙을 우선한다. 이 통화는 AI가 연기하는 일상 대화다. 사용자의 첫 발화 전에는 말하지 않는다. 위험 상황을 먼저 언급하거나 자세한 위험 설명을 요구하지 않는다. ")
 			.append("신고·문자·위치 전송을 실행했다고 주장하지 않는다. 위험도를 판단하거나 대치·추적·촬영을 유도하지 않는다. 도구를 호출하지 않는다.\n");
+		text.append("최우선 호칭 규칙: AI는 사용자의 이름을 모른다. 사용자를 실제 이름이나 가상의 이름·별명·애칭으로 추측하거나 지어내어 부르지 않는다. ")
+			.append("사용자가 대화 중 자신의 이름을 말해도 그 이름을 호칭으로 따라 부르지 않는다. 첫 인사부터 마지막 발화까지 사용자를 이름으로 부르는 행위는 절대 금지한다. 아래 관계별 호칭만 사용하거나 호칭을 생략한다.\n");
 		text.append("대화는 현재 상황을 직접 폭로하지 않는 자연스러운 안부 통화처럼 이어간다. 사용자를 데리러 가겠다고 약속하거나 큰길 등 특정 장소로 이동하라고 지시하지 않는다. ")
 			.append(scenarioGuide(prompt.scenario())).append('\n');
 		text.append("정확히 ").append(DEMO_CLOSING_SIGNAL).append("라는 제어 신호를 받으면 이를 사용자의 말로 취급하거나 소리 내 읽지 않는다. ")
 			.append(closingGuide(prompt.counterpart())).append(" 새로운 질문을 하지 말고, 이 한 번의 짧은 마무리 발화 뒤에는 어떤 말도 더 하지 않는다.\n");
-		if(address) text.append("사용자를 ").append("MALE".equals(gender)?"아들":"딸").append("로 부를 수 있다.\n");
-		else if("FRIEND".equals(prompt.counterpart())) text.append("사용자를 너로 부른다.\n");
-		else text.append("사용자의 성별을 추정하는 호칭을 쓰지 않는다.\n");
+		if(address) text.append("사용자의 성별이 확인되었으므로 부모 역할에서는 사용자를 ").append("MALE".equals(gender)?"아들":"딸").append("로 부른다. 이름을 붙여 부르지 않는다.\n");
+		else if("FRIEND".equals(prompt.counterpart())) text.append("사용자를 너로 부른다. 직접 부를 때는 '야'처럼 이름 없는 호칭만 쓰고 이름을 붙이지 않는다.\n");
+		else text.append("사용자의 성별이 확인되지 않았으므로 아들·딸처럼 성별을 전제하는 호칭을 쓰지 않는다. '야'처럼 이름 없는 중립 호칭을 쓰거나 호칭을 생략한다.\n");
 		if(demographic) text.append(prompt.demographic().replace("{age}",Integer.toString(Period.between(birth,today).getYears()))
 			.replace("{gender}","MALE".equals(gender)?"남성":"여성")).append('\n');
 		else text.append(prompt.guest()).append(" 나이·학교·학원 등 확인되지 않은 생활 정보를 추정하지 않는다.\n");
